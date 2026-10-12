@@ -53,3 +53,9 @@ services:
             -
                 App\VendingMachine\Application\HealthCheck\HealthCheck:
                     - '@App\VendingMachine\Application\HealthCheck\HealthCheckHandler'
+                App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachine:
+                    - '@App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachineHandler'
+                App\VendingMachine\Application\RestockVendingMachine\RestockVendingMachine:
+                    - '@App\VendingMachine\Application\RestockVendingMachine\RestockVendingMachineHandler'
+                App\VendingMachine\Application\GetVendingMachineState\GetVendingMachineState:
+                    - '@App\VendingMachine\Application\GetVendingMachineState\GetVendingMachineStateHandler'

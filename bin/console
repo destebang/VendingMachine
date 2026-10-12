@@ -4,6 +4,10 @@
 declare(strict_types=1);
 
 use App\Kernel\ContainerFactory;
+use App\VendingMachine\Infrastructure\Console\GetVendingMachineCommand;
+use App\VendingMachine\Infrastructure\Console\HealthCheckCommand;
+use App\VendingMachine\Infrastructure\Console\ProvisionVendingMachineCommand;
+use App\VendingMachine\Infrastructure\Console\RestockVendingMachineCommand;
 use Symfony\Component\Console\Application;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
@@ -11,6 +15,14 @@ require dirname(__DIR__) . '/vendor/autoload.php';
 $container = ContainerFactory::create();
 
 $application = new Application('vending-machine', 'bootstrap');
-$application->add($container->get(\App\VendingMachine\Infrastructure\Console\HealthCheckCommand::class));
+
+foreach ([
+    HealthCheckCommand::class,
+    ProvisionVendingMachineCommand::class,
+    RestockVendingMachineCommand::class,
+    GetVendingMachineCommand::class,
+] as $command) {
+    $application->add($container->get($command));
+}
 
 exit($application->run());

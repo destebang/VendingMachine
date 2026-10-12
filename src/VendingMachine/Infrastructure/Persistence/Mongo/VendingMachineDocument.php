@@ -23,6 +23,28 @@ class VendingMachineDocument
     #[ODM\Version]
     public int $version = 0;
 
+    #[ODM\Field(type: 'int')]
+    public int $balanceInCents = 0;
+
+    /**
+     * Item stock as a list of flat rows: selector code, price in cents and
+     * units loaded. Stored as a list (not a map) so MongoDB keeps it ordered
+     * and round-trips it as a plain array.
+     *
+     * @var list<array{selectorCode: string, priceInCents: int, stock: int}>
+     */
+    #[ODM\Field(type: 'raw')]
+    public array $stock = [];
+
+    /**
+     * Coin/note reserve as a list of flat rows: denomination in cents and
+     * number of units held.
+     *
+     * @var list<array{denominationInCents: int, quantity: int}>
+     */
+    #[ODM\Field(type: 'raw')]
+    public array $change = [];
+
     public function __construct(string $id, int $version = 0)
     {
         $this->id = $id;

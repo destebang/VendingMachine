@@ -163,13 +163,15 @@ docker compose exec -e MONGO_DB=vending_test -e REDIS_URL=redis://redis:6379/1 \
   reserve staying untouched), change-making (largest denominations first,
   backtracking when a greedy choice cannot be completed) and all four selection
   outcomes. It also covers the domain events: the event each mutation records
-  (and its payload) and the rejections that record nothing.
-* **Integration** (`tests/Integration`) — the MongoDB repository, the Redis
+  (and its payload), the rejections that record nothing, and the projector that
+  turns each event into the read-side view.
+* **Integration** (`tests/Integration`) — the MongoDB repository, the typed Redis
   read-model repository and the
   provision/service/insert-coin/select-item/return-coin use cases against real
-  instances, plus domain-event publication: each write command dispatched
-  through the real command bus appends the expected traceability document(s) to
-  `domain_events` (and the rejections that mutate nothing append none).
+  instances, all driven through the real command bus. Each write command appends
+  the expected traceability document(s) to `domain_events` (and the rejections
+  that mutate nothing append none), and the event-driven projection keeps the
+  Redis read model in step.
 * **Functional** (`tests/Functional`) — boots the real HTTP application and the
   real CLI commands and exercises provisioning, servicing, inserting coins,
   reading state, selecting products and returning inserted coins (plus the
@@ -244,18 +246,19 @@ src/
     │   ├── Model/               # Money, Denomination, Product, ChangeDue,
     │   │                        # VendedItem, VendingMachineId, VendingMachine
     │   ├── Event/               # Recorded domain events (base + 6 concrete)
+    │   ├── Read/                # MachineStateView + read-model port
     │   ├── Repository/          # VendingMachineRepository (port)
     │   └── Exception/
     ├── Application/            # Use cases: orchestrates the domain,
     │   │                        # talks only to ports.
     │   ├── HealthCheck/         # Stack smoke test (command + handler + result)
-    │   ├── ProvisionVendingMachine/  # Create a machine, seed the projection
+    │   ├── ProvisionVendingMachine/  # Create a machine
     │   ├── ServiceVendingMachine/    # Service action: replace stock + cash reserve
     │   ├── InsertCoin/               # Customer inserts a coin; balance grows
     │   ├── SelectItem/               # Customer selects a product; vend + change
     │   ├── ReturnCoin/               # Customer takes back the coins inserted
     │   ├── GetVendingMachineState/   # Read-side query over the Redis projection
-    │   └── ReadModel/           # Read-model port + MachineStateView
+    │   └── Read/                # VendingMachineProjector (events -> read model)
     └── Infrastructure/         # Adapters: the only place that knows about
         │                        # Mongo/Redis/HTTP/console.
         ├── Persistence/Mongo/   # Doctrine ODM document + repository
@@ -316,23 +319,28 @@ failing listener is swallowed and logged, never failing the original command.
 
 A generic `MongoDomainEventStore` listener appends every event to the
 `domain_events` collection for traceability, deriving `aggregateType` and
-`eventType` from the event's FQCN and stamping `occurredAt` at write time. The
-read-side projection is still pushed by the handlers in this slice.
+`eventType` from the event's FQCN and stamping `occurredAt` at write time.
 
 ### MongoDB (write model) / Redis (read model)
 
 `VendingMachineDocument` (Doctrine ODM) is intentionally a separate class
 from the `VendingMachine` domain aggregate; `MongoVendingMachineRepository`
 is the only place that translates between them, and carries a `version` field
-for optimistic concurrency. The Redis read model
-(`RedisVendingMachineStateReadModelRepository`) stores one JSON document per
-machine and is reachable only through the `VendingMachineStateReadModelRepository`
-port. The write commands project a `MachineStateView` into it (provisioning
-seeds it, servicing replaces it, returning resets the balance), and
-`GetVendingMachineState` serves reads straight from it without touching the
-write side. `SelectItem` refreshes it for every outcome, because a rejected
-selection can still change the machine — an exact-change refund resets the
-balance.
+for optimistic concurrency.
+
+The Redis read model (`RedisVendingMachineStateReadModelRepository`) stores one
+JSON document per machine and is reachable only through the typed
+`VendingMachineStateReadModelRepository` port (`put(MachineStateView)` /
+`get(): ?MachineStateView`), which lives in `Domain/Read/` alongside the
+read-side `MachineStateView`; the adapter owns the key and storage format.
+
+Projection is **event-driven**: the write handlers no longer push to the read
+model — they are `get → domain call → save`. The `VendingMachineProjector`
+reacts to each published domain event and projects the state the event carries
+into the read model. A rejected selection that mutated state (the exact-change
+refund) still commits, so it still records its event and the projection still
+reflects the reset balance. `GetVendingMachineState` serves reads straight from
+the projection without touching the write side.
 
 ## Extending it
 
@@ -355,11 +363,8 @@ balance.
   invocation rather than cached to disk — acceptable at this scale, but a
   production deployment would dump the compiled container once and reuse it.
 * `$_ENV`-based configuration in the infrastructure factories is simple but
-  bypasses Symfony's `%env()%` parameter resolution; fine for three
-  variables, worth revisiting if configuration grows.
-* The read-model port still speaks a raw state array; `MachineStateView` is the
-  typed projection on top of it. Folding the DTO into the port signature is a
-  natural next step once a second projection shape exists.
+  bypasses Symfony's `%env()%` parameter resolution; fine for a few variables,
+  worth revisiting if configuration grows.
 * The accepted-denomination allow-list lives on the `VendingMachine`
   aggregate (`ACCEPTED_DENOMINATIONS_IN_CENTS`) rather than being configurable
   per machine. Fine while every machine takes the same coins; a per-machine set
@@ -374,10 +379,10 @@ balance.
   denomination can be given back, so a reserve holding 1-unit coins would return
   them as change; the specification's "1 coins are never recirculated" rule would
   be a small, explicit filter on the search if it were wanted.
-* A rejected selection is persisted and projected like a successful one, so the
-  projection always reflects the balance after the attempt. That costs a
-  no-op write on `InsufficientFunds` and `OutOfStock`, where the machine's state
-  does not actually change.
+* A rejected selection is still committed (`SelectItemHandler` saves in a
+  `finally`), so an exact-change refund records its event and the projection
+  reflects the reset balance. `InsufficientFunds` and `OutOfStock` commit a
+  no-op write and publish nothing, since the machine's state did not change.
 * Two Mago rules are tuned in `mago.toml`: `too-many-methods` is raised and
   skips tests (test classes grow one method per case), and
   `inline-variable-return` is off because its fixer strips the `@var` that

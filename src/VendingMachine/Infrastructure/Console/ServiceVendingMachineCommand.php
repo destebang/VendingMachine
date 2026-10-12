@@ -108,7 +108,7 @@ final class ServiceVendingMachineCommand extends Command
             throw $transportException;
         }
 
-        $output->writeln(json_encode($result->state->toArray(), JSON_THROW_ON_ERROR));
+        $output->writeln(json_encode($result->toArray(), JSON_THROW_ON_ERROR));
 
         return Command::SUCCESS;
     }

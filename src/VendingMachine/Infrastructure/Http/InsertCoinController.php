@@ -50,7 +50,7 @@ final class InsertCoinController
             return $this->errorResponse($transportException);
         }
 
-        return new JsonResponse($result->state->toArray());
+        return new JsonResponse($result->toArray());
     }
 
     private function errorResponse(HandlerFailedException $transportException): JsonResponse

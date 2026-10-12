@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Application\HealthCheck;
 
-use App\VendingMachine\Application\ReadModel\VendingMachineStateReadModelRepository;
 use App\VendingMachine\Domain\Model\VendingMachine;
 use App\VendingMachine\Domain\Model\VendingMachineId;
+use App\VendingMachine\Domain\Read\MachineStateView;
+use App\VendingMachine\Domain\Read\VendingMachineStateReadModelRepository;
 use App\VendingMachine\Domain\Repository\VendingMachineRepository;
 use Throwable;
 
@@ -44,10 +45,10 @@ final class HealthCheckHandler
     {
         try {
             $marker = bin2hex(random_bytes(8));
-            $this->readModel->put($marker, ['ping' => 'pong']);
+            $this->readModel->put(new MachineStateView($marker, [], [], 0));
             $state = $this->readModel->get($marker);
 
-            return ($state['ping'] ?? null) === 'pong';
+            return $state?->id === $marker;
         } catch (Throwable) {
             return false;
         }

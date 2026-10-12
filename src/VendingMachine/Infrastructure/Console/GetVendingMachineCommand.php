@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\VendingMachine\Infrastructure\Console;
 
 use App\VendingMachine\Application\GetVendingMachineState\GetVendingMachineState;
-use App\VendingMachine\Application\ReadModel\MachineStateView;
+use App\VendingMachine\Domain\Read\MachineStateView;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;

@@ -4,25 +4,21 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Application\InsertCoin;
 
-use App\VendingMachine\Application\ReadModel\MachineStateView;
-use App\VendingMachine\Application\ReadModel\VendingMachineStateReadModelRepository;
 use App\VendingMachine\Domain\Repository\VendingMachineRepository;
 
 /**
- * Loads the machine, records the inserted coin on the aggregate, persists the
- * new state and refreshes the Redis projection so the updated balance is
- * readable immediately.
+ * Loads the machine, records the inserted coin on the aggregate and persists the
+ * new state.
  *
  * A denomination the machine does not accept is rejected by the domain and that
- * rejection propagates untouched, leaving both the write model and the
- * projection unchanged; a missing machine surfaces as
- * `VendingMachineNotFoundException`.
+ * rejection propagates untouched, leaving the write model unchanged; a missing
+ * machine surfaces as `VendingMachineNotFoundException`. The read model is
+ * projected from the `CoinInserted` event the save records, not pushed here.
  */
 final class InsertCoinHandler
 {
     public function __construct(
         private readonly VendingMachineRepository $vendingMachineRepository,
-        private readonly VendingMachineStateReadModelRepository $readModel,
     ) {}
 
     public function __invoke(InsertCoin $command): InsertCoinResult
@@ -33,9 +29,6 @@ final class InsertCoinHandler
 
         $this->vendingMachineRepository->save($vendingMachine);
 
-        $state = MachineStateView::fromAggregate($vendingMachine);
-        $this->readModel->put($state->id, $state->toArray());
-
-        return new InsertCoinResult($state);
+        return new InsertCoinResult($vendingMachine->state());
     }
 }

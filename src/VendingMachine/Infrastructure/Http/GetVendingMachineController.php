@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\VendingMachine\Infrastructure\Http;
 
 use App\VendingMachine\Application\GetVendingMachineState\GetVendingMachineState;
-use App\VendingMachine\Application\ReadModel\MachineStateView;
+use App\VendingMachine\Domain\Read\MachineStateView;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Messenger\HandleTrait;
 use Symfony\Component\Messenger\MessageBusInterface;

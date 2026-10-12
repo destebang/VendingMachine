@@ -38,7 +38,7 @@ final class VendingMachineTest extends TestCase
 
         $machine = VendingMachine::reconstitute(
             $id,
-            InsertedFunds::of(Money::fromCents(50)),
+            InsertedFunds::fromDenominations([25, 25]),
             Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 3)]),
             CashReserve::fromCounts([100 => 2]),
             7,
@@ -91,7 +91,7 @@ final class VendingMachineTest extends TestCase
     {
         $machine = VendingMachine::reconstitute(
             VendingMachineId::generate(),
-            InsertedFunds::of(Money::fromCents(50)),
+            InsertedFunds::fromDenominations([25, 25]),
             Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 3)]),
             CashReserve::fromCounts([100 => 2]),
             0,
@@ -166,6 +166,58 @@ final class VendingMachineTest extends TestCase
         } catch (InvalidDenominationException) {
             self::assertSame(25, $machine->state()->insertedFunds->amount()->amountInCents());
         }
+    }
+
+    public function test_returning_inserted_funds_hands_back_the_exact_coins_and_resets_the_balance(): void
+    {
+        $machine = VendingMachine::create(VendingMachineId::generate());
+
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+        $machine->insertCoin(Denomination::of(Money::fromCents(10)));
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+
+        $returnedFunds = $machine->returnInsertedFunds();
+
+        self::assertSame([25, 10, 25], $returnedFunds->denominationsInCents());
+        self::assertSame(60, $returnedFunds->amount()->amountInCents());
+        self::assertTrue($machine->state()->insertedFunds->isEmpty());
+        self::assertSame(0, $machine->state()->insertedFunds->amount()->amountInCents());
+    }
+
+    public function test_returning_funds_never_touches_the_cash_reserve(): void
+    {
+        $machine = $this->stockedMachine();
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+
+        $machine->returnInsertedFunds();
+
+        self::assertSame([25 => 40, 10 => 40, 5 => 40], $machine->state()->cashReserve->counts());
+    }
+
+    public function test_returning_with_nothing_inserted_is_a_no_op(): void
+    {
+        $machine = VendingMachine::create(VendingMachineId::generate());
+
+        $returnedFunds = $machine->returnInsertedFunds();
+
+        self::assertTrue($returnedFunds->isEmpty());
+        self::assertSame([], $returnedFunds->denominationsInCents());
+        self::assertSame(0, $machine->state()->insertedFunds->amount()->amountInCents());
+    }
+
+    public function test_a_return_ends_the_pending_transaction_so_the_machine_can_be_serviced(): void
+    {
+        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+
+        $machine->returnInsertedFunds();
+
+        $machine->service(
+            Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
+            CashReserve::fromCounts([100 => 5]),
+        );
+
+        self::assertSame(10, $machine->state()->stock->quantityOf('WATER'));
     }
 
     public function test_selecting_a_product_with_exact_funds_vends_it_and_gives_no_change(): void

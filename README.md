@@ -8,10 +8,11 @@ Redis-backed read model.
 HTTP, CLI, MongoDB, Redis, dependency injection, a Messenger command bus, and a
 three-layer test suite — and carries the customer-facing use cases: provision a
 vending machine, service it (declare its true item stock and coin reserve), read
-its current state back, insert coins toward the price of an item, and select a
-product to vend it and hand back any change due. The write side lives in MongoDB
-(Doctrine ODM), the read side in Redis, and the two are kept in step by the
-command handlers. A health check still round-trips data through both stores.
+its current state back, insert coins toward the price of an item, select a
+product to vend it and hand back any change due, and return every inserted coin
+before buying. The write side lives in MongoDB (Doctrine ODM), the read side in
+Redis, and the two are kept in step by the command handlers. A health check still
+round-trips data through both stores.
 
 ## Requirements
 
@@ -101,6 +102,15 @@ A selection the machine cannot serve is rejected with a clear reason (HTTP 409):
 (the balance is kept), or `InsufficientChangeAvailable` (the whole balance is
 returned).
 
+Changed your mind before selecting? Return every inserted coin: the machine hands
+back exactly the coins you put in — never a set drawn from its change reserve —
+and resets the balance to zero. Returning with nothing inserted is a no-op:
+
+```bash
+curl -s -X POST http://localhost:8000/vending-machines/$ID/return-coin
+# -> {"id":"...","returnedCoins":[10,10],"insertedFundsInCents":0}
+```
+
 The same use cases are available through the CLI, dispatching the exact same
 commands through the same bus:
 
@@ -111,6 +121,7 @@ docker compose exec app php bin/console app:vending-machine:service $ID \
   --cash-reserve='[{"denominationInCents":100,"quantity":5}]'
 docker compose exec app php bin/console app:vending-machine:insert-coin $ID --denomination-in-cents=25
 docker compose exec app php bin/console app:vending-machine:select-item $ID WATER
+docker compose exec app php bin/console app:vending-machine:return-coin $ID
 docker compose exec app php bin/console app:vending-machine:show $ID
 ```
 
@@ -124,6 +135,7 @@ examples:
 1, 0.25, 0.25, select SODA   -> SODA
 1, select WATER              -> WATER, 0.25, 0.10
 0.25, select WATER           -> InsufficientFunds (balance kept)
+0.10, 0.10, return-coin      -> 0.10, 0.10
 ```
 
 ## Running the tests
@@ -143,21 +155,24 @@ docker compose exec -e MONGO_DB=vending_test -e REDIS_URL=redis://redis:6379/1 \
 ```
 
 * **Unit** (`tests/Unit`) — domain value objects and entities
-  (`Money`, `Denomination`, `Product`, `ChangeDue`, `VendingMachine`),
-  exercised in isolation with no I/O, including the service replace semantics,
-  the mid-transaction rejection, coin insertion (accepted denominations
-  accumulating, rejected ones leaving the balance untouched), change-making
-  (largest denominations first, backtracking when a greedy choice cannot be
-  completed) and all four selection outcomes.
+  (`Money`, `Denomination`, `Product`, `ChangeDue`, `InsertedFunds`,
+  `VendingMachine`), exercised in isolation with no I/O, including the service
+  replace semantics, the mid-transaction rejection, coin insertion (accepted
+  denominations accumulating, rejected ones leaving the balance untouched),
+  returning inserted funds (the exact coins handed back, the no-op case and the
+  reserve staying untouched), change-making (largest denominations first,
+  backtracking when a greedy choice cannot be completed) and all four selection
+  outcomes.
 * **Integration** (`tests/Integration`) — the MongoDB repository, the Redis
-  read-model repository and the provision/service/insert-coin/select-item use
-  cases against real instances.
+  read-model repository and the
+  provision/service/insert-coin/select-item/return-coin use cases against real
+  instances.
 * **Functional** (`tests/Functional`) — boots the real HTTP application and the
   real CLI commands and exercises provisioning, servicing, inserting coins,
-  reading state and selecting products (plus the mid-transaction,
-  rejected-denomination and rejected-selection cases) through the full
-  request/response (and input/output) cycle, Messenger bus included. The three
-  specification examples are replayed end-to-end.
+  reading state, selecting products and returning inserted coins (plus the
+  mid-transaction, rejected-denomination and rejected-selection cases) through
+  the full request/response (and input/output) cycle, Messenger bus included.
+  The four specification examples are replayed end-to-end.
 
 CI runs all three suites automatically on every push and pull request (see
 `.github/workflows/tests.yml`).
@@ -188,13 +203,14 @@ src/
     │   ├── ServiceVendingMachine/    # Service action: replace stock + cash reserve
     │   ├── InsertCoin/               # Customer inserts a coin; balance grows
     │   ├── SelectItem/               # Customer selects a product; vend + change
+    │   ├── ReturnCoin/               # Customer takes back the coins inserted
     │   ├── GetVendingMachineState/   # Read-side query over the Redis projection
     │   └── ReadModel/           # Read-model port + MachineStateView
     └── Infrastructure/         # Adapters: the only place that knows about
         │                        # Mongo/Redis/HTTP/console.
         ├── Persistence/Mongo/   # Doctrine ODM document + repository
         ├── ReadModel/Redis/     # Redis-backed read model repository
-        ├── Http/                # HealthCheck + provision/service/insert-coin/select/get controllers
+        ├── Http/                # HealthCheck + provision/service/insert-coin/select/return/get controllers
         └── Console/             # HealthCheck + vending-machine commands
 ```
 
@@ -222,10 +238,9 @@ A single Symfony Messenger command bus (`config/services.yaml`,
 `command.bus`) is configured with a synchronous, in-memory
 `HandlersLocator`. Every use case is a command or query dispatched through it
 and handled by exactly one handler: `ProvisionVendingMachine`,
-`ServiceVendingMachine`, `InsertCoin`, `SelectItem`, the
+`ServiceVendingMachine`, `InsertCoin`, `SelectItem`, `ReturnCoin`, the
 `GetVendingMachineState` query and the `HealthCheck` smoke test all go through
-it. The remaining vending-machine command (return coin) will follow the same
-shape.
+it.
 
 ### MongoDB (write model) / Redis (read model)
 
@@ -235,11 +250,12 @@ is the only place that translates between them, and carries a `version` field
 for optimistic concurrency. The Redis read model
 (`RedisVendingMachineStateReadModelRepository`) stores one JSON document per
 machine and is reachable only through the `VendingMachineStateReadModelRepository`
-port. Both write commands project a `MachineStateView` into it (provisioning
-seeds it, servicing replaces it), and `GetVendingMachineState` serves reads
-straight from it without touching the write side. `SelectItem` refreshes it for
-every outcome, because a rejected selection can still change the machine — an
-exact-change refund resets the balance.
+port. The write commands project a `MachineStateView` into it (provisioning
+seeds it, servicing replaces it, returning resets the balance), and
+`GetVendingMachineState` serves reads straight from it without touching the
+write side. `SelectItem` refreshes it for every outcome, because a rejected
+selection can still change the machine — an exact-change refund resets the
+balance.
 
 ## Extending it
 
@@ -271,10 +287,11 @@ exact-change refund resets the balance.
   aggregate (`ACCEPTED_DENOMINATIONS_IN_CENTS`) rather than being configurable
   per machine. Fine while every machine takes the same coins; a per-machine set
   would move onto the aggregate and into the Mongo document.
-* Inserted funds are modelled as a running total (`InsertedFunds`), which is all
-  a selection needs. "Return coin" (#5) must hand back the *literal* coins the
-  customer put in, so that use case will grow `InsertedFunds` into a collection
-  of the individual denominations inserted.
+* Inserted funds are modelled as the collection of the individual coins
+  inserted (`InsertedFunds`), so a return can hand back exactly those coins —
+  never a set drawn from the reserve. The read model still projects only their
+  total (`insertedFundsInCents`); exposing the literal coins on the query side
+  is a natural next step if a channel needs it.
 * Change is made from the cash reserve with a bounded backtracking search over
   the denominations the machine actually holds. There is no cap on which
   denomination can be given back, so a reserve holding 1-unit coins would return

@@ -8,6 +8,7 @@ use App\VendingMachine\Infrastructure\Console\GetVendingMachineCommand;
 use App\VendingMachine\Infrastructure\Console\HealthCheckCommand;
 use App\VendingMachine\Infrastructure\Console\InsertCoinCommand;
 use App\VendingMachine\Infrastructure\Console\ProvisionVendingMachineCommand;
+use App\VendingMachine\Infrastructure\Console\ReturnCoinCommand;
 use App\VendingMachine\Infrastructure\Console\SelectItemCommand;
 use App\VendingMachine\Infrastructure\Console\ServiceVendingMachineCommand;
 use Symfony\Component\Console\Application;
@@ -24,6 +25,7 @@ foreach ([
     ServiceVendingMachineCommand::class,
     InsertCoinCommand::class,
     SelectItemCommand::class,
+    ReturnCoinCommand::class,
     GetVendingMachineCommand::class,
 ] as $command) {
     $application->add($container->get($command));

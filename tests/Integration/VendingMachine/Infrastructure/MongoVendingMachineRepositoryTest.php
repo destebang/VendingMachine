@@ -40,7 +40,7 @@ final class MongoVendingMachineRepositoryTest extends TestCase
 
         $repository->save(VendingMachine::reconstitute(
             $id,
-            InsertedFunds::of(Money::fromCents(50)),
+            InsertedFunds::fromDenominations([25, 25]),
             Stock::fromProducts([
                 Product::create('WATER', Money::fromCents(65), 4),
                 Product::create('CHIPS', Money::fromCents(120), 7),
@@ -53,6 +53,7 @@ final class MongoVendingMachineRepositoryTest extends TestCase
 
         self::assertNotNull($found);
         self::assertSame(50, $found->state()->insertedFunds->amount()->amountInCents());
+        self::assertSame([25, 25], $found->state()->insertedFunds->denominationsInCents());
         self::assertSame([100 => 5, 50 => 3], $found->state()->cashReserve->counts());
         self::assertSame(4, $found->state()->stock->quantityOf('WATER'));
         self::assertSame(65, $found->state()->stock->products()['WATER']->price()->amountInCents());

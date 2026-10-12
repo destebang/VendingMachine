@@ -61,5 +61,7 @@ services:
                     - '@App\VendingMachine\Application\InsertCoin\InsertCoinHandler'
                 App\VendingMachine\Application\SelectItem\SelectItem:
                     - '@App\VendingMachine\Application\SelectItem\SelectItemHandler'
+                App\VendingMachine\Application\ReturnCoin\ReturnCoin:
+                    - '@App\VendingMachine\Application\ReturnCoin\ReturnCoinHandler'
                 App\VendingMachine\Application\GetVendingMachineState\GetVendingMachineState:
                     - '@App\VendingMachine\Application\GetVendingMachineState\GetVendingMachineStateHandler'

@@ -9,6 +9,7 @@ use App\VendingMachine\Domain\Model\VendingMachineId;
 use App\VendingMachine\Infrastructure\Console\GetVendingMachineCommand;
 use App\VendingMachine\Infrastructure\Console\InsertCoinCommand;
 use App\VendingMachine\Infrastructure\Console\ProvisionVendingMachineCommand;
+use App\VendingMachine\Infrastructure\Console\ReturnCoinCommand;
 use App\VendingMachine\Infrastructure\Console\SelectItemCommand;
 use App\VendingMachine\Infrastructure\Console\ServiceVendingMachineCommand;
 use PHPUnit\Framework\TestCase;
@@ -109,6 +110,38 @@ final class VendingMachineCommandTest extends TestCase
             'id' => VendingMachineId::generate()->toString(),
             '--denomination-in-cents' => '25',
         ]));
+    }
+
+    public function test_the_cli_can_return_inserted_coins(): void
+    {
+        $container = ContainerFactory::create();
+
+        $provision = new CommandTester($container->get(ProvisionVendingMachineCommand::class));
+        $provision->execute([]);
+
+        $id = json_decode($provision->getDisplay(), true, flags: JSON_THROW_ON_ERROR)['id'];
+
+        $insertCoin = new CommandTester($container->get(InsertCoinCommand::class));
+        $insertCoin->execute(['id' => $id, '--denomination-in-cents' => '10']);
+        $insertCoin->execute(['id' => $id, '--denomination-in-cents' => '10']);
+
+        $returnCoin = new CommandTester($container->get(ReturnCoinCommand::class));
+
+        self::assertSame(0, $returnCoin->execute(['id' => $id]));
+        self::assertSame([
+            'id' => $id,
+            'returnedCoins' => [10, 10],
+            'insertedFundsInCents' => 0,
+        ], json_decode($returnCoin->getDisplay(), true, flags: JSON_THROW_ON_ERROR));
+    }
+
+    public function test_returning_on_an_unknown_machine_fails(): void
+    {
+        $container = ContainerFactory::create();
+
+        $returnCoin = new CommandTester($container->get(ReturnCoinCommand::class));
+
+        self::assertSame(1, $returnCoin->execute(['id' => VendingMachineId::generate()->toString()]));
     }
 
     public function test_the_cli_can_vend_an_item_and_return_change(): void

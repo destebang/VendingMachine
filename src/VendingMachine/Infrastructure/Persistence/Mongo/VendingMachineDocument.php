@@ -23,8 +23,15 @@ class VendingMachineDocument
     #[ODM\Version]
     public int $version = 0;
 
-    #[ODM\Field(type: 'int')]
-    public int $insertedFundsInCents = 0;
+    /**
+     * The literal coins the customer has inserted, in cents, in the order they
+     * were inserted. Stored as a list (not a total) so a return can hand back
+     * exactly these coins.
+     *
+     * @var list<int>
+     */
+    #[ODM\Field(type: 'raw')]
+    public array $insertedDenominationsInCents = [];
 
     /**
      * Stock as a list of flat rows: selector code, price in cents and units

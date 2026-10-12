@@ -8,44 +8,69 @@ namespace App\VendingMachine\Domain\Model;
  * Money a customer has put into a machine that has not yet been spent or
  * returned.
  *
- * Modelling this explicitly (rather than as a bare `Money`) gives the customer
- * side of the machine a name: a non-empty value is exactly what makes a
- * transaction pending, and inserting funds is the only way it grows.
+ * Modelled as the collection of the individual coins inserted, not as a running
+ * total, so that a return can hand back *exactly* the coins the customer put in
+ * — never a set drawn from the machine's cash reserve. The amount is derived
+ * from the coins, and a non-empty collection is exactly what makes a
+ * transaction pending.
  */
 final class InsertedFunds
 {
+    /**
+     * @param list<int> $denominationsInCents the literal coins inserted, in the
+     *                                       order they were inserted
+     */
     private function __construct(
-        private readonly Money $amount,
+        private readonly array $denominationsInCents,
     ) {
     }
 
     public static function none(): self
     {
-        return new self(Money::zero());
+        return new self([]);
     }
 
-    public static function of(Money $amount): self
+    /**
+     * @param list<int> $denominationsInCents
+     */
+    public static function fromDenominations(array $denominationsInCents): self
     {
-        return new self($amount);
+        return new self(array_values($denominationsInCents));
     }
 
     public function isEmpty(): bool
     {
-        return $this->amount->isZero();
+        return $this->denominationsInCents === [];
     }
 
+    /**
+     * The total value inserted so far.
+     */
     public function amount(): Money
     {
-        return $this->amount;
+        return Money::fromCents((int) array_sum($this->denominationsInCents));
     }
 
-    public function plus(Money $added): self
+    /**
+     * The literal coins inserted, in the order they were inserted, e.g. [25, 10].
+     *
+     * @return list<int>
+     */
+    public function denominationsInCents(): array
     {
-        return new self($this->amount->add($added));
+        return $this->denominationsInCents;
+    }
+
+    public function plus(Denomination $coin): self
+    {
+        $denominations = $this->denominationsInCents;
+        $denominations[] = $coin->amount()->amountInCents();
+
+        return new self($denominations);
     }
 
     public function equals(self $other): bool
     {
-        return $this->amount->equals($other->amount);
+        return $this->denominationsInCents === $other->denominationsInCents;
     }
 }

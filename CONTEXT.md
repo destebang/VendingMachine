@@ -55,6 +55,12 @@ The product a machine hands over on a successful selection, together with the
 change due.
 _Avoid_: dispensed item, product out, output
 
+**Return**:
+A customer taking back every coin they inserted, ending the pending transaction
+without a sale. The coins handed back are exactly those inserted, never drawn
+from the cash reserve.
+_Avoid_: refund, cancel, eject, coin return
+
 **Service**:
 A technician declaring a machine's true stock and cash reserve, replacing
 whatever was there. Rejected while a transaction is pending.

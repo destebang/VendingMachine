@@ -37,7 +37,7 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
 
         return VendingMachine::reconstitute(
             $id,
-            InsertedFunds::of(Money::fromCents($document->insertedFundsInCents)),
+            InsertedFunds::fromDenominations($document->insertedDenominationsInCents),
             Stock::fromProducts(self::stockFromDocument($document->stock)),
             CashReserve::fromCounts(self::cashReserveFromDocument($document->cashReserve)),
             $document->version,
@@ -60,7 +60,7 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
             $this->documentManager->persist($document);
         }
 
-        $document->insertedFundsInCents = $state->insertedFunds->amount()->amountInCents();
+        $document->insertedDenominationsInCents = $state->insertedFunds->denominationsInCents();
         $document->stock = self::stockToDocument($state->stock->products());
         $document->cashReserve = self::cashReserveToDocument($state->cashReserve->counts());
 

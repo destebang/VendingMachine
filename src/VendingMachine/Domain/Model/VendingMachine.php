@@ -97,7 +97,24 @@ final class VendingMachine
             throw InvalidDenominationException::notAllowed($amountInCents, self::ACCEPTED_DENOMINATIONS_IN_CENTS);
         }
 
-        $this->insertedFunds = $this->insertedFunds->plus($coin->amount());
+        $this->insertedFunds = $this->insertedFunds->plus($coin);
+    }
+
+    /**
+     * Customer action: take back every coin inserted so far, ending the pending
+     * transaction without a sale.
+     *
+     * The funds handed back are *exactly* the coins the customer inserted —
+     * never a set drawn from the cash reserve — and the inserted balance is
+     * reset to zero. A no-op when nothing has been inserted: the returned funds
+     * are simply empty.
+     */
+    public function returnInsertedFunds(): InsertedFunds
+    {
+        $returnedFunds = $this->insertedFunds;
+        $this->insertedFunds = InsertedFunds::none();
+
+        return $returnedFunds;
     }
 
     /**

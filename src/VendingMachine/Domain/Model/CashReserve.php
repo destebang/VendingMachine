@@ -31,10 +31,15 @@ final class CashReserve
     }
 
     /**
+     * A reserve built from a stored count map. Denominations with no units are
+     * not holdings, so zero-quantity lines are dropped; the result never claims
+     * to be non-empty while holding nothing.
+     *
      * @param array<int, int> $counts denomination in cents => number of units
      */
     public static function fromCounts(array $counts): self
     {
+        $normalized = [];
         foreach ($counts as $denominationInCents => $quantity) {
             if ($denominationInCents <= 0) {
                 throw InvalidCashReserveException::nonPositiveDenomination($denominationInCents);
@@ -43,9 +48,15 @@ final class CashReserve
             if ($quantity < 0) {
                 throw InvalidCashReserveException::negativeQuantity($denominationInCents, $quantity);
             }
+
+            if ($quantity === 0) {
+                continue;
+            }
+
+            $normalized[$denominationInCents] = $quantity;
         }
 
-        return new self($counts);
+        return new self($normalized);
     }
 
     public function isEmpty(): bool
@@ -53,9 +64,9 @@ final class CashReserve
         return $this->counts === [];
     }
 
-    public function quantityOf(int $denominationInCents): int
+    public function quantityOf(Denomination $denomination): int
     {
-        return $this->counts[$denominationInCents] ?? 0;
+        return $this->counts[$denomination->amount()->amountInCents()] ?? 0;
     }
 
     /**

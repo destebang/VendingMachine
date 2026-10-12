@@ -6,6 +6,8 @@ namespace App\Tests\Unit\VendingMachine\Domain\Model;
 
 use App\VendingMachine\Domain\Exception\InvalidCashReserveException;
 use App\VendingMachine\Domain\Model\CashReserve;
+use App\VendingMachine\Domain\Model\Denomination;
+use App\VendingMachine\Domain\Model\Money;
 use PHPUnit\Framework\TestCase;
 
 final class CashReserveTest extends TestCase
@@ -15,7 +17,7 @@ final class CashReserveTest extends TestCase
         $reserve = CashReserve::empty();
 
         self::assertTrue($reserve->isEmpty());
-        self::assertSame(0, $reserve->quantityOf(100));
+        self::assertSame(0, $reserve->quantityOf(Denomination::of(Money::fromCents(100))));
         self::assertSame(0, $reserve->total()->amountInCents());
         self::assertSame([], $reserve->counts());
     }
@@ -25,10 +27,31 @@ final class CashReserveTest extends TestCase
         $reserve = CashReserve::fromCounts([100 => 5, 50 => 2]);
 
         self::assertFalse($reserve->isEmpty());
-        self::assertSame(5, $reserve->quantityOf(100));
-        self::assertSame(2, $reserve->quantityOf(50));
+        self::assertSame(5, $reserve->quantityOf(Denomination::of(Money::fromCents(100))));
+        self::assertSame(2, $reserve->quantityOf(Denomination::of(Money::fromCents(50))));
         self::assertSame(600, $reserve->total()->amountInCents());
         self::assertSame([100 => 5, 50 => 2], $reserve->counts());
+    }
+
+    public function test_a_denomination_it_does_not_hold_counts_as_zero(): void
+    {
+        $reserve = CashReserve::fromCounts([100 => 5]);
+
+        self::assertSame(0, $reserve->quantityOf(Denomination::of(Money::fromCents(50))));
+    }
+
+    public function test_zero_quantity_lines_are_dropped(): void
+    {
+        $reserve = CashReserve::fromCounts([100 => 0, 50 => 2]);
+
+        self::assertFalse($reserve->isEmpty());
+        self::assertSame(0, $reserve->quantityOf(Denomination::of(Money::fromCents(100))));
+        self::assertSame([50 => 2], $reserve->counts());
+    }
+
+    public function test_a_reserve_of_only_zero_quantity_lines_is_empty(): void
+    {
+        self::assertTrue(CashReserve::fromCounts([100 => 0])->isEmpty());
     }
 
     public function test_it_rejects_a_non_positive_denomination(): void

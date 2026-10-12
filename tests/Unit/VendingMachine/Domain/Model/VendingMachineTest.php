@@ -6,6 +6,7 @@ namespace App\Tests\Unit\VendingMachine\Domain\Model;
 
 use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
 use App\VendingMachine\Domain\Model\CashReserve;
+use App\VendingMachine\Domain\Model\Denomination;
 use App\VendingMachine\Domain\Model\InsertedFunds;
 use App\VendingMachine\Domain\Model\Money;
 use App\VendingMachine\Domain\Model\Product;
@@ -43,7 +44,7 @@ final class VendingMachineTest extends TestCase
         self::assertTrue($state->id->equals($id));
         self::assertSame(7, $state->version);
         self::assertSame(3, $state->stock->quantityOf('WATER'));
-        self::assertSame(2, $state->cashReserve->quantityOf(100));
+        self::assertSame(2, $state->cashReserve->quantityOf(Denomination::of(Money::fromCents(100))));
         self::assertSame(50, $state->insertedFunds->amount()->amountInCents());
     }
 

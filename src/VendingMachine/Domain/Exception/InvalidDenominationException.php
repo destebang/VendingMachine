@@ -8,6 +8,11 @@ use InvalidArgumentException;
 
 final class InvalidDenominationException extends InvalidArgumentException
 {
+    public static function notPositive(int $amountInCents): self
+    {
+        return new self(sprintf('A denomination must be a positive amount of cents, got %d.', $amountInCents));
+    }
+
     /**
      * @param list<int> $allowedAmountsInCents
      */

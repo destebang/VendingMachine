@@ -7,6 +7,7 @@ namespace App\Tests\Functional;
 use App\Kernel\ContainerFactory;
 use App\VendingMachine\Domain\Model\VendingMachineId;
 use App\VendingMachine\Infrastructure\Console\GetVendingMachineCommand;
+use App\VendingMachine\Infrastructure\Console\InsertCoinCommand;
 use App\VendingMachine\Infrastructure\Console\ProvisionVendingMachineCommand;
 use App\VendingMachine\Infrastructure\Console\ServiceVendingMachineCommand;
 use PHPUnit\Framework\TestCase;
@@ -53,6 +54,60 @@ final class VendingMachineCommandTest extends TestCase
             'cashReserve' => [['denominationInCents' => 100, 'quantity' => 5]],
             'insertedFundsInCents' => 0,
         ], json_decode($show->getDisplay(), true, flags: JSON_THROW_ON_ERROR));
+    }
+
+    public function test_the_cli_can_insert_coins_accumulating_the_balance(): void
+    {
+        $container = ContainerFactory::create();
+
+        $provision = new CommandTester($container->get(ProvisionVendingMachineCommand::class));
+        $provision->execute([]);
+
+        $id = json_decode($provision->getDisplay(), true, flags: JSON_THROW_ON_ERROR)['id'];
+
+        $insertCoin = new CommandTester($container->get(InsertCoinCommand::class));
+
+        self::assertSame(0, $insertCoin->execute(['id' => $id, '--denomination-in-cents' => '25']));
+        self::assertSame(
+            25,
+            json_decode($insertCoin->getDisplay(), true, flags: JSON_THROW_ON_ERROR)['insertedFundsInCents'],
+        );
+
+        self::assertSame(0, $insertCoin->execute(['id' => $id, '--denomination-in-cents' => '100']));
+        self::assertSame(
+            125,
+            json_decode($insertCoin->getDisplay(), true, flags: JSON_THROW_ON_ERROR)['insertedFundsInCents'],
+        );
+    }
+
+    public function test_the_cli_rejects_a_denomination_the_machine_does_not_accept(): void
+    {
+        $container = ContainerFactory::create();
+
+        $provision = new CommandTester($container->get(ProvisionVendingMachineCommand::class));
+        $provision->execute([]);
+
+        $id = json_decode($provision->getDisplay(), true, flags: JSON_THROW_ON_ERROR)['id'];
+
+        $insertCoin = new CommandTester($container->get(InsertCoinCommand::class));
+
+        self::assertSame(1, $insertCoin->execute(['id' => $id, '--denomination-in-cents' => '50']));
+        self::assertSame(
+            'InvalidDenomination',
+            json_decode($insertCoin->getDisplay(), true, flags: JSON_THROW_ON_ERROR)['error'],
+        );
+    }
+
+    public function test_inserting_into_an_unknown_machine_fails(): void
+    {
+        $container = ContainerFactory::create();
+
+        $insertCoin = new CommandTester($container->get(InsertCoinCommand::class));
+
+        self::assertSame(1, $insertCoin->execute([
+            'id' => VendingMachineId::generate()->toString(),
+            '--denomination-in-cents' => '25',
+        ]));
     }
 
     public function test_showing_an_unknown_machine_fails(): void

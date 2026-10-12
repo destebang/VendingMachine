@@ -13,6 +13,7 @@ use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachine;
 use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachineHandler;
 use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
 use App\VendingMachine\Domain\Model\CashReserve;
+use App\VendingMachine\Domain\Model\Denomination;
 use App\VendingMachine\Domain\Model\Money;
 use App\VendingMachine\Domain\Model\Product;
 use App\VendingMachine\Domain\Model\Stock;
@@ -128,7 +129,7 @@ final class ProvisionAndServiceTest extends TestCase
     {
         $id = VendingMachineId::generate();
         $machine = VendingMachine::create($id);
-        $machine->insertFunds(Money::fromCents(50));
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
 
         $this->repository->save($machine);
         $this->readModel->put($id->toString(), MachineStateView::fromAggregate($machine)->toArray());
@@ -150,7 +151,7 @@ final class ProvisionAndServiceTest extends TestCase
         self::assertTrue($stored->state()->cashReserve->isEmpty());
 
         self::assertSame(
-            ['id' => $id->toString(), 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 50],
+            ['id' => $id->toString(), 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 25],
             $this->readModel->get($id->toString()),
         );
     }

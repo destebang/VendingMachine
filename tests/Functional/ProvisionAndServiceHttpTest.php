@@ -7,6 +7,7 @@ namespace App\Tests\Functional;
 use App\Kernel\ContainerFactory;
 use App\Kernel\DocumentManagerFactory;
 use App\Kernel\HttpApplication;
+use App\VendingMachine\Domain\Model\Denomination;
 use App\VendingMachine\Domain\Model\Money;
 use App\VendingMachine\Domain\Model\VendingMachine;
 use App\VendingMachine\Domain\Model\VendingMachineId;
@@ -84,7 +85,7 @@ final class ProvisionAndServiceHttpTest extends TestCase
         $id = VendingMachineId::generate();
 
         $machine = VendingMachine::create($id);
-        $machine->insertFunds(Money::fromCents(50));
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
         $repository->save($machine);
 
         $response = $this->application->handle($this->serviceRequest($id->toString(), [

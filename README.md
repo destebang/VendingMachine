@@ -4,13 +4,14 @@ A vending machine, built on standalone Symfony components (no
 `framework-bundle`), with a MongoDB-backed write model (Doctrine ODM) and a
 Redis-backed read model.
 
-**Current state: first feature slice.** The whole stack boots end-to-end —
-HTTP, CLI, MongoDB, Redis, dependency injection, a Messenger command bus, and
-a three-layer test suite — and carries its first real use cases: provision a
-vending machine, service it (declare its true item stock and coin reserve), and
-read its current state back. The write side lives in MongoDB (Doctrine ODM),
-the read side in Redis, and the two are kept in step by the command handlers.
-A health check still round-trips data through both stores.
+**Current state: first customer-facing slice.** The whole stack boots
+end-to-end — HTTP, CLI, MongoDB, Redis, dependency injection, a Messenger
+command bus, and a three-layer test suite — and carries its first real use
+cases: provision a vending machine, service it (declare its true item stock and
+coin reserve), read its current state back, and insert coins toward the price of
+an item. The write side lives in MongoDB (Doctrine ODM), the read side in Redis,
+and the two are kept in step by the command handlers. A health check still
+round-trips data through both stores.
 
 ## Requirements
 
@@ -73,14 +74,26 @@ curl -s http://localhost:8000/vending-machines/$ID
 #     "cashReserve":[{"denominationInCents":100,"quantity":5}],"insertedFundsInCents":0}
 ```
 
-The same three use cases are available through the CLI, dispatching the exact
-same commands through the same bus:
+Insert a coin: the machine accepts 5, 10, 25 and 100 cent coins, rejects
+anything else, and the response carries the updated balance
+(`insertedFundsInCents`):
+
+```bash
+curl -s -X POST http://localhost:8000/vending-machines/$ID/coins \
+  -H 'Content-Type: application/json' \
+  -d '{"denominationInCents":25}'
+# -> {"id":"...","stock":[...],"cashReserve":[...],"insertedFundsInCents":25}
+```
+
+The same use cases are available through the CLI, dispatching the exact same
+commands through the same bus:
 
 ```bash
 docker compose exec app php bin/console app:vending-machine:provision
 docker compose exec app php bin/console app:vending-machine:service $ID \
   --stock='[{"selectorCode":"WATER","priceInCents":65,"stock":10}]' \
   --cash-reserve='[{"denominationInCents":100,"quantity":5}]'
+docker compose exec app php bin/console app:vending-machine:insert-coin $ID --denomination-in-cents=25
 docker compose exec app php bin/console app:vending-machine:show $ID
 ```
 
@@ -102,15 +115,17 @@ docker compose exec -e MONGO_DB=vending_test -e REDIS_URL=redis://redis:6379/1 \
 
 * **Unit** (`tests/Unit`) — domain value objects and entities
   (`Money`, `Denomination`, `Product`, `VendingMachine`), exercised in
-  isolation with no I/O, including the service replace semantics and the
-  mid-transaction rejection.
+  isolation with no I/O, including the service replace semantics, the
+  mid-transaction rejection, and coin insertion (accepted denominations
+  accumulating, rejected ones leaving the balance untouched).
 * **Integration** (`tests/Integration`) — the MongoDB repository, the Redis
-  read-model repository and the provision/service use cases against real
-  instances.
+  read-model repository and the provision/service/insert-coin use cases against
+  real instances.
 * **Functional** (`tests/Functional`) — boots the real HTTP application and the
-  real CLI commands and exercises provisioning, servicing and reading state
-  (plus the mid-transaction rejection) through the full request/response (and
-  input/output) cycle, Messenger bus included.
+  real CLI commands and exercises provisioning, servicing, inserting coins and
+  reading state (plus the mid-transaction and rejected-denomination cases)
+  through the full request/response (and input/output) cycle, Messenger bus
+  included.
 
 CI runs all three suites automatically on every push and pull request (see
 `.github/workflows/tests.yml`).
@@ -139,13 +154,14 @@ src/
     │   ├── HealthCheck/         # Stack smoke test (command + handler + result)
     │   ├── ProvisionVendingMachine/  # Create a machine, seed the projection
     │   ├── ServiceVendingMachine/    # Service action: replace stock + cash reserve
+    │   ├── InsertCoin/               # Customer inserts a coin; balance grows
     │   ├── GetVendingMachineState/   # Read-side query over the Redis projection
     │   └── ReadModel/           # Read-model port + MachineStateView
     └── Infrastructure/         # Adapters: the only place that knows about
         │                        # Mongo/Redis/HTTP/console.
         ├── Persistence/Mongo/   # Doctrine ODM document + repository
         ├── ReadModel/Redis/     # Redis-backed read model repository
-        ├── Http/                # HealthCheck + provision/service/get controllers
+        ├── Http/                # HealthCheck + provision/service/insert-coin/get controllers
         └── Console/             # HealthCheck + vending-machine commands
 ```
 
@@ -173,10 +189,9 @@ A single Symfony Messenger command bus (`config/services.yaml`,
 `command.bus`) is configured with a synchronous, in-memory
 `HandlersLocator`. Every use case is a command or query dispatched through it
 and handled by exactly one handler: `ProvisionVendingMachine`,
-`ServiceVendingMachine`, the `GetVendingMachineState` query and the
-`HealthCheck` smoke test all go through it. The remaining vending-machine
-commands (insert coin, select product, return coin) will follow the same
-shape.
+`ServiceVendingMachine`, `InsertCoin`, the `GetVendingMachineState` query and
+the `HealthCheck` smoke test all go through it. The remaining vending-machine
+commands (select product, return coin) will follow the same shape.
 
 ### MongoDB (write model) / Redis (read model)
 
@@ -216,7 +231,11 @@ straight from it without touching the write side.
 * The read-model port still speaks a raw state array; `MachineStateView` is the
   typed projection on top of it. Folding the DTO into the port signature is a
   natural next step once a second projection shape exists.
-* There is no customer-facing use case yet (inserting funds and selecting a
-  product through the API, returning change). The aggregate can already record
-  inserted funds — and the mid-transaction guard is exercised through that —
-  but no driving adapter exposes insertion until the next slice lands.
+* The accepted-denomination allow-list lives on the `VendingMachine`
+  aggregate (`ACCEPTED_DENOMINATIONS_IN_CENTS`) rather than being configurable
+  per machine. Fine while every machine takes the same coins; a per-machine set
+  would move onto the aggregate and into the Mongo document.
+* There is still no use case for selecting a product or returning change, so
+  inserted funds can only grow — nothing spends or refunds them yet. The
+  aggregate already guards servicing mid-transaction, and `InsertCoin` is the
+  first driving adapter that grows the balance.

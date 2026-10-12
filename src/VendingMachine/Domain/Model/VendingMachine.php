@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Domain\Model;
 
+use App\VendingMachine\Domain\Exception\InvalidDenominationException;
 use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
 
 /**
@@ -21,6 +22,16 @@ use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
  */
 final class VendingMachine
 {
+    /**
+     * The denominations this machine accepts from a customer: 5c, 10c, 25c and
+     * 1 unit. A property of the machine rather than of a coin — the same coin
+     * can be legal tender and still be rejected by a machine that does not take
+     * it.
+     *
+     * @var list<int>
+     */
+    public const ACCEPTED_DENOMINATIONS_IN_CENTS = [5, 10, 25, 100];
+
     private function __construct(
         private readonly VendingMachineId $id,
         private InsertedFunds $insertedFunds,
@@ -69,12 +80,21 @@ final class VendingMachine
     }
 
     /**
-     * Records money the customer has put into the machine. The only way
-     * inserted funds grow.
+     * Records an accepted coin the customer has inserted. The only way inserted
+     * funds grow.
+     *
+     * Rejected with a clear error — leaving inserted funds untouched — when the
+     * machine does not take the coin's denomination.
      */
-    public function insertFunds(Money $amount): void
+    public function insertCoin(Denomination $coin): void
     {
-        $this->insertedFunds = $this->insertedFunds->plus($amount);
+        $amountInCents = $coin->amount()->amountInCents();
+
+        if (!in_array($amountInCents, self::ACCEPTED_DENOMINATIONS_IN_CENTS, strict: true)) {
+            throw InvalidDenominationException::notAllowed($amountInCents, self::ACCEPTED_DENOMINATIONS_IN_CENTS);
+        }
+
+        $this->insertedFunds = $this->insertedFunds->plus($coin->amount());
     }
 
     /**

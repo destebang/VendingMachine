@@ -6,6 +6,7 @@ declare(strict_types=1);
 use App\Kernel\ContainerFactory;
 use App\VendingMachine\Infrastructure\Console\GetVendingMachineCommand;
 use App\VendingMachine\Infrastructure\Console\HealthCheckCommand;
+use App\VendingMachine\Infrastructure\Console\InsertCoinCommand;
 use App\VendingMachine\Infrastructure\Console\ProvisionVendingMachineCommand;
 use App\VendingMachine\Infrastructure\Console\ServiceVendingMachineCommand;
 use Symfony\Component\Console\Application;
@@ -20,6 +21,7 @@ foreach ([
     HealthCheckCommand::class,
     ProvisionVendingMachineCommand::class,
     ServiceVendingMachineCommand::class,
+    InsertCoinCommand::class,
     GetVendingMachineCommand::class,
 ] as $command) {
     $application->add($container->get($command));

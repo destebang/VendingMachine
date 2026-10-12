@@ -57,5 +57,7 @@ services:
                     - '@App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachineHandler'
                 App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachine:
                     - '@App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachineHandler'
+                App\VendingMachine\Application\InsertCoin\InsertCoin:
+                    - '@App\VendingMachine\Application\InsertCoin\InsertCoinHandler'
                 App\VendingMachine\Application\GetVendingMachineState\GetVendingMachineState:
                     - '@App\VendingMachine\Application\GetVendingMachineState\GetVendingMachineStateHandler'

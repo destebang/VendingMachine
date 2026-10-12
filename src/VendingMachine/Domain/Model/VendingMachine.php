@@ -15,6 +15,9 @@ use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
  * collection is a value object rather than a raw array, so its invariants and
  * shape live here instead of being re-derived by the projection and the
  * repository.
+ *
+ * The aggregate exposes behaviour, not its fields: everything the outside world
+ * reads comes out through a single `state()` snapshot.
  */
 final class VendingMachine
 {
@@ -50,29 +53,19 @@ final class VendingMachine
         return new self($id, $insertedFunds, $stock, $cashReserve, $version);
     }
 
-    public function id(): VendingMachineId
+    /**
+     * Snapshot of everything the machine currently holds. The one way out of
+     * the aggregate for persistence and the read-model projection.
+     */
+    public function state(): VendingMachineState
     {
-        return $this->id;
-    }
-
-    public function version(): int
-    {
-        return $this->version;
-    }
-
-    public function insertedFunds(): InsertedFunds
-    {
-        return $this->insertedFunds;
-    }
-
-    public function stock(): Stock
-    {
-        return $this->stock;
-    }
-
-    public function cashReserve(): CashReserve
-    {
-        return $this->cashReserve;
+        return new VendingMachineState(
+            $this->id,
+            $this->stock,
+            $this->cashReserve,
+            $this->insertedFunds,
+            $this->version,
+        );
     }
 
     /**
@@ -104,19 +97,11 @@ final class VendingMachine
 
     /**
      * True while a customer has inserted funds and the transaction has not
-     * been completed or cancelled yet.
+     * been completed or cancelled yet. Internal invariant, not part of the
+     * aggregate's public surface.
      */
-    public function hasPendingTransaction(): bool
+    private function hasPendingTransaction(): bool
     {
         return !$this->insertedFunds->isEmpty();
-    }
-
-    /**
-     * Bumps the optimistic-concurrency version. Called by the repository
-     * after every successful write, never by business logic.
-     */
-    public function incrementVersion(): void
-    {
-        $this->version++;
     }
 }

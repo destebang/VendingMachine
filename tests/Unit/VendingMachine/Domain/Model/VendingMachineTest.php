@@ -18,44 +18,33 @@ final class VendingMachineTest extends TestCase
 {
     public function test_a_newly_created_machine_starts_empty(): void
     {
-        $machine = VendingMachine::create(VendingMachineId::generate());
+        $state = VendingMachine::create(VendingMachineId::generate())->state();
 
-        self::assertSame(0, $machine->version());
-        self::assertTrue($machine->stock()->isEmpty());
-        self::assertTrue($machine->cashReserve()->isEmpty());
-        self::assertTrue($machine->insertedFunds()->isEmpty());
-        self::assertFalse($machine->hasPendingTransaction());
-    }
-
-    public function test_incrementing_version_bumps_it_by_one(): void
-    {
-        $machine = VendingMachine::create(VendingMachineId::generate());
-
-        $machine->incrementVersion();
-        $machine->incrementVersion();
-
-        self::assertSame(2, $machine->version());
+        self::assertSame(0, $state->version);
+        self::assertTrue($state->stock->isEmpty());
+        self::assertTrue($state->cashReserve->isEmpty());
+        self::assertTrue($state->insertedFunds->isEmpty());
     }
 
     public function test_reconstitute_restores_identity_version_and_state(): void
     {
         $id = VendingMachineId::generate();
-        $stock = Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 3)]);
-        $cashReserve = CashReserve::fromCounts([100 => 2]);
 
         $machine = VendingMachine::reconstitute(
             $id,
             InsertedFunds::of(Money::fromCents(50)),
-            $stock,
-            $cashReserve,
+            Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 3)]),
+            CashReserve::fromCounts([100 => 2]),
             7,
         );
 
-        self::assertTrue($machine->id()->equals($id));
-        self::assertSame(7, $machine->version());
-        self::assertSame(3, $machine->stock()->quantityOf('WATER'));
-        self::assertSame(2, $machine->cashReserve()->quantityOf(100));
-        self::assertSame(50, $machine->insertedFunds()->amount()->amountInCents());
+        $state = $machine->state();
+
+        self::assertTrue($state->id->equals($id));
+        self::assertSame(7, $state->version);
+        self::assertSame(3, $state->stock->quantityOf('WATER'));
+        self::assertSame(2, $state->cashReserve->quantityOf(100));
+        self::assertSame(50, $state->insertedFunds->amount()->amountInCents());
     }
 
     public function test_service_replaces_rather_than_adds_to_stock_and_reserve(): void
@@ -72,9 +61,11 @@ final class VendingMachineTest extends TestCase
             CashReserve::fromCounts([50 => 1]),
         );
 
-        self::assertSame(['CHIPS'], array_keys($machine->stock()->products()));
-        self::assertSame(2, $machine->stock()->quantityOf('CHIPS'));
-        self::assertSame([50 => 1], $machine->cashReserve()->counts());
+        $state = $machine->state();
+
+        self::assertSame(['CHIPS'], array_keys($state->stock->products()));
+        self::assertSame(2, $state->stock->quantityOf('CHIPS'));
+        self::assertSame([50 => 1], $state->cashReserve->counts());
     }
 
     public function test_service_is_rejected_while_a_transaction_is_pending(): void
@@ -107,21 +98,20 @@ final class VendingMachineTest extends TestCase
             );
             self::fail('Expected the service action to be rejected while a transaction is pending.');
         } catch (PendingTransactionInProgressException) {
-            self::assertSame(['WATER'], array_keys($machine->stock()->products()));
-            self::assertSame([100 => 2], $machine->cashReserve()->counts());
+            $state = $machine->state();
+
+            self::assertSame(['WATER'], array_keys($state->stock->products()));
+            self::assertSame([100 => 2], $state->cashReserve->counts());
         }
     }
 
-    public function test_inserting_funds_makes_the_transaction_pending(): void
+    public function test_inserting_funds_is_recorded(): void
     {
         $machine = VendingMachine::create(VendingMachineId::generate());
-
-        self::assertFalse($machine->hasPendingTransaction());
 
         $machine->insertFunds(Money::fromCents(50));
         $machine->insertFunds(Money::fromCents(25));
 
-        self::assertTrue($machine->hasPendingTransaction());
-        self::assertSame(75, $machine->insertedFunds()->amount()->amountInCents());
+        self::assertSame(75, $machine->state()->insertedFunds->amount()->amountInCents());
     }
 }

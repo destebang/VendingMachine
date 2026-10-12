@@ -51,9 +51,9 @@ final class ProvisionAndServiceTest extends TestCase
         $stored = $this->repository->find(VendingMachineId::fromString($result->id()));
 
         self::assertNotNull($stored);
-        self::assertTrue($stored->stock()->isEmpty());
-        self::assertTrue($stored->cashReserve()->isEmpty());
-        self::assertTrue($stored->insertedFunds()->isEmpty());
+        self::assertTrue($stored->state()->stock->isEmpty());
+        self::assertTrue($stored->state()->cashReserve->isEmpty());
+        self::assertTrue($stored->state()->insertedFunds->isEmpty());
 
         self::assertSame(
             ['id' => $result->id(), 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 0],
@@ -74,8 +74,8 @@ final class ProvisionAndServiceTest extends TestCase
         $stored = $this->repository->find(VendingMachineId::fromString($id));
 
         self::assertNotNull($stored);
-        self::assertSame(10, $stored->stock()->quantityOf('WATER'));
-        self::assertSame([100 => 5, 50 => 3], $stored->cashReserve()->counts());
+        self::assertSame(10, $stored->state()->stock->quantityOf('WATER'));
+        self::assertSame([100 => 5, 50 => 3], $stored->state()->cashReserve->counts());
 
         self::assertSame([
             'id' => $id,
@@ -110,10 +110,10 @@ final class ProvisionAndServiceTest extends TestCase
         $stored = $this->repository->find(VendingMachineId::fromString($id));
 
         self::assertNotNull($stored);
-        self::assertSame(['CHIPS'], array_keys($stored->stock()->products()));
-        self::assertSame(1, $stored->stock()->quantityOf('CHIPS'));
-        self::assertSame(150, $stored->stock()->products()['CHIPS']->price()->amountInCents());
-        self::assertSame([50 => 2], $stored->cashReserve()->counts());
+        self::assertSame(['CHIPS'], array_keys($stored->state()->stock->products()));
+        self::assertSame(1, $stored->state()->stock->quantityOf('CHIPS'));
+        self::assertSame(150, $stored->state()->stock->products()['CHIPS']->price()->amountInCents());
+        self::assertSame([50 => 2], $stored->state()->cashReserve->counts());
 
         $projected = $this->readModel->get($id);
 
@@ -146,8 +146,8 @@ final class ProvisionAndServiceTest extends TestCase
 
         $stored = $this->repository->find($id);
         self::assertNotNull($stored);
-        self::assertTrue($stored->stock()->isEmpty());
-        self::assertTrue($stored->cashReserve()->isEmpty());
+        self::assertTrue($stored->state()->stock->isEmpty());
+        self::assertTrue($stored->state()->cashReserve->isEmpty());
 
         self::assertSame(
             ['id' => $id->toString(), 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 50],

@@ -26,13 +26,14 @@ final class ProvisionVendingMachineHandler
     public function __invoke(ProvisionVendingMachine $command): ProvisionVendingMachineResult
     {
         $vendingMachine = VendingMachine::create(VendingMachineId::generate());
+        $state = $vendingMachine->state();
 
         $this->vendingMachineRepository->save($vendingMachine);
         $this->readModel->put(
-            $vendingMachine->id()->toString(),
+            $state->id->toString(),
             MachineStateView::fromAggregate($vendingMachine)->toArray(),
         );
 
-        return new ProvisionVendingMachineResult($vendingMachine->id());
+        return new ProvisionVendingMachineResult($state->id);
     }
 }

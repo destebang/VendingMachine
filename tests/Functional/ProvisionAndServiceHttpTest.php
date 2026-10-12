@@ -101,8 +101,8 @@ final class ProvisionAndServiceHttpTest extends TestCase
         $stored = $repository->find($id);
 
         self::assertNotNull($stored);
-        self::assertTrue($stored->stock()->isEmpty());
-        self::assertTrue($stored->cashReserve()->isEmpty());
+        self::assertTrue($stored->state()->stock->isEmpty());
+        self::assertTrue($stored->state()->cashReserve->isEmpty());
     }
 
     /**

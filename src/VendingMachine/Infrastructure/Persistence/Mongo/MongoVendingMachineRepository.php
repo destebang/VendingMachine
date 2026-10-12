@@ -45,16 +45,18 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
 
     public function save(VendingMachine $vendingMachine): void
     {
-        $document = $this->documentManager->find(VendingMachineDocument::class, $vendingMachine->id()->toString());
+        $state = $vendingMachine->state();
+
+        $document = $this->documentManager->find(VendingMachineDocument::class, $state->id->toString());
 
         if (!$document instanceof VendingMachineDocument) {
-            $document = new VendingMachineDocument($vendingMachine->id()->toString(), $vendingMachine->version());
+            $document = new VendingMachineDocument($state->id->toString(), $state->version);
             $this->documentManager->persist($document);
         }
 
-        $document->insertedFundsInCents = $vendingMachine->insertedFunds()->amount()->amountInCents();
-        $document->stock = self::stockToDocument($vendingMachine->stock()->products());
-        $document->cashReserve = self::cashReserveToDocument($vendingMachine->cashReserve()->counts());
+        $document->insertedFundsInCents = $state->insertedFunds->amount()->amountInCents();
+        $document->stock = self::stockToDocument($state->stock->products());
+        $document->cashReserve = self::cashReserveToDocument($state->cashReserve->counts());
 
         $this->documentManager->flush();
     }

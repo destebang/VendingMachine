@@ -29,7 +29,7 @@ final class MongoVendingMachineRepositoryTest extends TestCase
         $found = $repository->find($id);
 
         self::assertNotNull($found);
-        self::assertTrue($found->id()->equals($id));
+        self::assertTrue($found->state()->id->equals($id));
     }
 
     public function test_it_round_trips_stock_reserve_and_inserted_funds(): void
@@ -51,10 +51,10 @@ final class MongoVendingMachineRepositoryTest extends TestCase
         $found = $repository->find($id);
 
         self::assertNotNull($found);
-        self::assertSame(50, $found->insertedFunds()->amount()->amountInCents());
-        self::assertSame([100 => 5, 50 => 3], $found->cashReserve()->counts());
-        self::assertSame(4, $found->stock()->quantityOf('WATER'));
-        self::assertSame(65, $found->stock()->products()['WATER']->price()->amountInCents());
-        self::assertSame(7, $found->stock()->quantityOf('CHIPS'));
+        self::assertSame(50, $found->state()->insertedFunds->amount()->amountInCents());
+        self::assertSame([100 => 5, 50 => 3], $found->state()->cashReserve->counts());
+        self::assertSame(4, $found->state()->stock->quantityOf('WATER'));
+        self::assertSame(65, $found->state()->stock->products()['WATER']->price()->amountInCents());
+        self::assertSame(7, $found->state()->stock->quantityOf('CHIPS'));
     }
 }

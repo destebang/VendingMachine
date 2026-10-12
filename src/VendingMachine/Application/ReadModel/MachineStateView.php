@@ -31,17 +31,19 @@ final class MachineStateView
 
     public static function fromAggregate(VendingMachine $vendingMachine): self
     {
+        $state = $vendingMachine->state();
+
         $stock = array_map(
             static fn (Product $product): array => [
                 'selectorCode' => $product->selectorCode(),
                 'priceInCents' => $product->price()->amountInCents(),
                 'stock' => $product->stock(),
             ],
-            array_values($vendingMachine->stock()->products()),
+            array_values($state->stock->products()),
         );
 
         $cashReserve = [];
-        foreach ($vendingMachine->cashReserve()->counts() as $denominationInCents => $quantity) {
+        foreach ($state->cashReserve->counts() as $denominationInCents => $quantity) {
             $cashReserve[] = [
                 'denominationInCents' => $denominationInCents,
                 'quantity' => $quantity,
@@ -49,10 +51,10 @@ final class MachineStateView
         }
 
         return new self(
-            id: $vendingMachine->id()->toString(),
+            id: $state->id->toString(),
             stock: array_values($stock),
             cashReserve: $cashReserve,
-            insertedFundsInCents: $vendingMachine->insertedFunds()->amount()->amountInCents(),
+            insertedFundsInCents: $state->insertedFunds->amount()->amountInCents(),
         );
     }
 

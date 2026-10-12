@@ -1,0 +1,51 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build the app image
+        run: docker compose build app
+
+      - name: Start the stack
+        run: docker compose up -d
+
+      - name: Wait for MongoDB and Redis
+        run: |
+          for i in $(seq 1 30); do
+            if docker compose exec -T app php bin/console app:health-check; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Stack did not become healthy in time" >&2
+          exit 1
+
+      - name: Run unit test suite
+        run: docker compose exec -T app vendor/bin/phpunit --testsuite=unit
+
+      - name: Run integration test suite
+        run: >
+          docker compose exec -T
+          -e MONGO_DB=vending_test
+          -e REDIS_URL=redis://redis:6379/1
+          app vendor/bin/phpunit --testsuite=integration
+
+      - name: Run functional test suite
+        run: >
+          docker compose exec -T
+          -e MONGO_DB=vending_test
+          -e REDIS_URL=redis://redis:6379/1
+          app vendor/bin/phpunit --testsuite=functional
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

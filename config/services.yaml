@@ -11,6 +11,7 @@ services:
             - '../src/Shared/Domain'
             - '../src/VendingMachine/Domain/Model'
             - '../src/VendingMachine/Domain/Event'
+            - '../src/VendingMachine/Domain/Read'
             - '../src/VendingMachine/Domain/Exception'
             - '../src/VendingMachine/Infrastructure/Persistence/Mongo/VendingMachineDocument.php'
 
@@ -26,7 +27,7 @@ services:
     App\VendingMachine\Domain\Repository\VendingMachineRepository:
         alias: App\VendingMachine\Infrastructure\Persistence\Mongo\MongoVendingMachineRepository
 
-    App\VendingMachine\Application\ReadModel\VendingMachineStateReadModelRepository:
+    App\VendingMachine\Domain\Read\VendingMachineStateReadModelRepository:
         alias: App\VendingMachine\Infrastructure\ReadModel\Redis\RedisVendingMachineStateReadModelRepository
 
     # --- Third-party clients, built by hand-written factories --------------
@@ -102,13 +103,19 @@ services:
             -
                 App\VendingMachine\Domain\Event\VendingMachineProvisioned:
                     - '@App\Shared\Infrastructure\EventBus\MongoDomainEventStore'
+                    - ['@App\VendingMachine\Application\Read\VendingMachineProjector', 'onVendingMachineProvisioned']
                 App\VendingMachine\Domain\Event\VendingMachineServiced:
                     - '@App\Shared\Infrastructure\EventBus\MongoDomainEventStore'
+                    - ['@App\VendingMachine\Application\Read\VendingMachineProjector', 'onVendingMachineServiced']
                 App\VendingMachine\Domain\Event\CoinInserted:
                     - '@App\Shared\Infrastructure\EventBus\MongoDomainEventStore'
+                    - ['@App\VendingMachine\Application\Read\VendingMachineProjector', 'onCoinInserted']
                 App\VendingMachine\Domain\Event\ItemVended:
                     - '@App\Shared\Infrastructure\EventBus\MongoDomainEventStore'
+                    - ['@App\VendingMachine\Application\Read\VendingMachineProjector', 'onItemVended']
                 App\VendingMachine\Domain\Event\InsertedFundsReturned:
                     - '@App\Shared\Infrastructure\EventBus\MongoDomainEventStore'
+                    - ['@App\VendingMachine\Application\Read\VendingMachineProjector', 'onInsertedFundsReturned']
                 App\VendingMachine\Domain\Event\InsertedFundsReturnedDueToInsufficientChange:
                     - '@App\Shared\Infrastructure\EventBus\MongoDomainEventStore'
+                    - ['@App\VendingMachine\Application\Read\VendingMachineProjector', 'onInsertedFundsReturnedDueToInsufficientChange']

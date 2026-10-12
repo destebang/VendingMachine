@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Application\SelectItem;
 
-use App\VendingMachine\Application\ReadModel\MachineStateView;
 use App\VendingMachine\Domain\Model\VendedItem;
+use App\VendingMachine\Domain\Model\VendingMachineState;
+use App\VendingMachine\Domain\Read\MachineStateView;
 
 /**
  * Result of selecting a product: the item that was vended, the change handed
@@ -16,7 +17,7 @@ final class SelectItemResult
 {
     public function __construct(
         public readonly VendedItem $vendedItem,
-        public readonly MachineStateView $state,
+        public readonly VendingMachineState $state,
     ) {}
 
     /**
@@ -30,12 +31,14 @@ final class SelectItemResult
      */
     public function toArray(): array
     {
+        $state = MachineStateView::fromState($this->state);
+
         return [
-            'id' => $this->state->id,
+            'id' => $state->id,
             'selectorCode' => $this->vendedItem->selectorCode,
             'priceInCents' => $this->vendedItem->price->amountInCents(),
             'change' => $this->vendedItem->changeDue->denominationsInCents(),
-            'insertedFundsInCents' => $this->state->insertedFundsInCents,
+            'insertedFundsInCents' => $state->insertedFundsInCents,
         ];
     }
 }

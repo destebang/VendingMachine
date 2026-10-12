@@ -4,56 +4,52 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\VendingMachine\Application;
 
+use App\Kernel\ContainerFactory;
 use App\Kernel\DocumentManagerFactory;
 use App\Kernel\RedisClientFactory;
 use App\Shared\Infrastructure\EventBus\DomainEventCollector;
+use App\Tests\Integration\IntegrationTestCase;
+use App\VendingMachine\Application\InsertCoin\InsertCoin;
 use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachine;
-use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachineHandler;
-use App\VendingMachine\Application\ReadModel\MachineStateView;
+use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachineResult;
 use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachine;
-use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachineHandler;
 use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
 use App\VendingMachine\Domain\Model\CashReserve;
-use App\VendingMachine\Domain\Model\Denomination;
 use App\VendingMachine\Domain\Model\Money;
 use App\VendingMachine\Domain\Model\Product;
 use App\VendingMachine\Domain\Model\Stock;
-use App\VendingMachine\Domain\Model\VendingMachine;
 use App\VendingMachine\Domain\Model\VendingMachineId;
 use App\VendingMachine\Infrastructure\Persistence\Mongo\MongoVendingMachineRepository;
 use App\VendingMachine\Infrastructure\ReadModel\Redis\RedisVendingMachineStateReadModelRepository;
-use PHPUnit\Framework\TestCase;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
 
 /**
- * Exercises the provision and service use cases against the real MongoDB write
- * model and the real Redis read model, with no in-memory doubles.
+ * Exercises the provision and service use cases against the real command bus,
+ * MongoDB write model and Redis read model, with no in-memory doubles.
  */
-final class ProvisionAndServiceTest extends TestCase
+final class ProvisionAndServiceTest extends IntegrationTestCase
 {
+    private ContainerBuilder $container;
+
     private MongoVendingMachineRepository $repository;
 
     private RedisVendingMachineStateReadModelRepository $readModel;
 
-    private ProvisionVendingMachineHandler $provision;
-
-    private ServiceVendingMachineHandler $service;
-
     protected function setUp(): void
     {
+        $this->container = ContainerFactory::create();
         $this->repository = new MongoVendingMachineRepository(
             DocumentManagerFactory::create(),
             new DomainEventCollector(),
         );
         $this->readModel = new RedisVendingMachineStateReadModelRepository(RedisClientFactory::create());
-        $this->provision = new ProvisionVendingMachineHandler($this->repository, $this->readModel);
-        $this->service = new ServiceVendingMachineHandler($this->repository, $this->readModel);
     }
 
     public function test_provisioning_persists_an_empty_machine_and_its_projection(): void
     {
-        $result = ($this->provision)(new ProvisionVendingMachine());
+        $id = $this->provisionId();
 
-        $stored = $this->repository->find(VendingMachineId::fromString($result->id()));
+        $stored = $this->repository->find(VendingMachineId::fromString($id));
 
         self::assertNotNull($stored);
         self::assertTrue($stored->state()->stock->isEmpty());
@@ -61,16 +57,17 @@ final class ProvisionAndServiceTest extends TestCase
         self::assertTrue($stored->state()->insertedFunds->isEmpty());
 
         self::assertSame(
-            ['id' => $result->id(), 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 0],
-            $this->readModel->get($result->id()),
+            ['id' => $id, 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 0],
+            $this->readModel->get($id)?->toArray(),
         );
     }
 
     public function test_service_updates_the_write_model_and_the_projection(): void
     {
-        $id = ($this->provision)(new ProvisionVendingMachine())->id();
+        $id = $this->provisionId();
 
-        ($this->service)(
+        $this->dispatch(
+            $this->container,
             new ServiceVendingMachine(
                 VendingMachineId::fromString($id),
                 Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
@@ -94,15 +91,16 @@ final class ProvisionAndServiceTest extends TestCase
                 ],
                 'insertedFundsInCents' => 0,
             ],
-            $this->readModel->get($id),
+            $this->readModel->get($id)?->toArray(),
         );
     }
 
     public function test_service_replaces_the_previous_state(): void
     {
-        $id = ($this->provision)(new ProvisionVendingMachine())->id();
+        $id = $this->provisionId();
 
-        ($this->service)(
+        $this->dispatch(
+            $this->container,
             new ServiceVendingMachine(
                 VendingMachineId::fromString($id),
                 Stock::fromProducts([
@@ -113,7 +111,8 @@ final class ProvisionAndServiceTest extends TestCase
             ),
         );
 
-        ($this->service)(
+        $this->dispatch(
+            $this->container,
             new ServiceVendingMachine(
                 VendingMachineId::fromString($id),
                 Stock::fromProducts([Product::create('CHIPS', Money::fromCents(150), 1)]),
@@ -132,40 +131,43 @@ final class ProvisionAndServiceTest extends TestCase
         $projected = $this->readModel->get($id);
 
         self::assertNotNull($projected);
-        self::assertSame([['selectorCode' => 'CHIPS', 'priceInCents' => 150, 'stock' => 1]], $projected['stock']);
-        self::assertSame([['denominationInCents' => 50, 'quantity' => 2]], $projected['cashReserve']);
+        self::assertSame([['selectorCode' => 'CHIPS', 'priceInCents' => 150, 'stock' => 1]], $projected->stock);
+        self::assertSame([['denominationInCents' => 50, 'quantity' => 2]], $projected->cashReserve);
     }
 
     public function test_service_is_rejected_and_changes_nothing_while_a_transaction_is_pending(): void
     {
-        $id = VendingMachineId::generate();
-        $machine = VendingMachine::create($id);
-        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+        $id = $this->provisionId();
+        $this->dispatch($this->container, InsertCoin::fromInput($id, 25));
 
-        $this->repository->save($machine);
-        $this->readModel->put($id->toString(), MachineStateView::fromAggregate($machine)->toArray());
+        $thrown = $this->dispatchExpectingFailure(
+            $this->container,
+            new ServiceVendingMachine(
+                VendingMachineId::fromString($id),
+                Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
+                CashReserve::fromCounts([100 => 5]),
+            ),
+        );
 
-        try {
-            ($this->service)(
-                new ServiceVendingMachine(
-                    $id,
-                    Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
-                    CashReserve::fromCounts([100 => 5]),
-                ),
-            );
-            self::fail('Expected the service action to be rejected while a transaction is pending.');
-        } catch (PendingTransactionInProgressException $exception) {
-            self::assertStringContainsString('transaction is in progress', $exception->getMessage());
-        }
+        self::assertInstanceOf(PendingTransactionInProgressException::class, $thrown);
 
-        $stored = $this->repository->find($id);
+        $stored = $this->repository->find(VendingMachineId::fromString($id));
+
         self::assertNotNull($stored);
         self::assertTrue($stored->state()->stock->isEmpty());
         self::assertTrue($stored->state()->cashReserve->isEmpty());
 
         self::assertSame(
-            ['id' => $id->toString(), 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 25],
-            $this->readModel->get($id->toString()),
+            ['id' => $id, 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 25],
+            $this->readModel->get($id)?->toArray(),
         );
+    }
+
+    private function provisionId(): string
+    {
+        /** @var ProvisionVendingMachineResult $result */
+        $result = $this->dispatch($this->container, new ProvisionVendingMachine());
+
+        return $result->id();
     }
 }

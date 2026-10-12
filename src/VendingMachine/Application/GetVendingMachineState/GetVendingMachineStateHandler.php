@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Application\GetVendingMachineState;
 
-use App\VendingMachine\Application\ReadModel\MachineStateView;
-use App\VendingMachine\Application\ReadModel\VendingMachineStateReadModelRepository;
+use App\VendingMachine\Domain\Read\MachineStateView;
+use App\VendingMachine\Domain\Read\VendingMachineStateReadModelRepository;
 
 /**
  * Serves the current state of a machine straight from the read model, without
@@ -20,12 +20,6 @@ final class GetVendingMachineStateHandler
 
     public function __invoke(GetVendingMachineState $query): ?MachineStateView
     {
-        $state = $this->readModel->get($query->vendingMachineId);
-
-        if ($state === null) {
-            return null;
-        }
-
-        return MachineStateView::fromArray($state);
+        return $this->readModel->get($query->vendingMachineId);
     }
 }

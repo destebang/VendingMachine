@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Shared\EventBus;
 
 use App\Kernel\ContainerFactory;
 use App\Kernel\MongoCollectionFactory;
+use App\Tests\Integration\IntegrationTestCase;
 use App\VendingMachine\Application\InsertCoin\InsertCoin;
 use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachine;
 use App\VendingMachine\Application\ReturnCoin\ReturnCoin;
@@ -17,18 +18,14 @@ use App\VendingMachine\Domain\Exception\InvalidDenominationException;
 use App\VendingMachine\Domain\Exception\OutOfStockException;
 use MongoDB\BSON\UTCDateTime;
 use MongoDB\Collection;
-use PHPUnit\Framework\TestCase;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
-use Symfony\Component\Messenger\Exception\HandlerFailedException;
-use Symfony\Component\Messenger\MessageBusInterface;
-use Throwable;
 
 /**
  * Dispatches the write commands through the real command bus (release
  * middleware, event bus and MongoDB store included) and asserts the traceability
  * documents appended to the `domain_events` collection.
  */
-final class DomainEventPublicationTest extends TestCase
+final class DomainEventPublicationTest extends IntegrationTestCase
 {
     private ContainerBuilder $container;
 
@@ -106,7 +103,7 @@ final class DomainEventPublicationTest extends TestCase
         $this->service($id);
         $this->insertCoin($id, 100);
 
-        $this->dispatch(SelectItem::fromInput($id, 'WATER'));
+        $this->dispatch($this->container, SelectItem::fromInput($id, 'WATER'));
 
         $documents = $this->documentsOfType('ItemVended');
 
@@ -127,7 +124,7 @@ final class DomainEventPublicationTest extends TestCase
         $this->insertCoin($id, 25);
         $this->insertCoin($id, 10);
 
-        $this->dispatch(ReturnCoin::fromInput($id));
+        $this->dispatch($this->container, ReturnCoin::fromInput($id));
 
         $documents = $this->documentsOfType('InsertedFundsReturned');
 
@@ -146,7 +143,7 @@ final class DomainEventPublicationTest extends TestCase
             $this->insertCoin($id, $denominationInCents);
         }
 
-        $thrown = $this->dispatchExpectingFailure(SelectItem::fromInput($id, 'WATER'));
+        $thrown = $this->dispatchExpectingFailure($this->container, SelectItem::fromInput($id, 'WATER'));
 
         self::assertInstanceOf(InsufficientChangeAvailableException::class, $thrown);
 
@@ -162,7 +159,7 @@ final class DomainEventPublicationTest extends TestCase
     {
         $id = $this->provision();
 
-        $thrown = $this->dispatchExpectingFailure(InsertCoin::fromInput($id, 50));
+        $thrown = $this->dispatchExpectingFailure($this->container, InsertCoin::fromInput($id, 50));
 
         self::assertInstanceOf(InvalidDenominationException::class, $thrown);
         self::assertCount(0, $this->documentsOfType('CoinInserted'));
@@ -175,7 +172,7 @@ final class DomainEventPublicationTest extends TestCase
         $this->service($id, stock: [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 0]]);
         $this->insertCoin($id, 100);
 
-        $thrown = $this->dispatchExpectingFailure(SelectItem::fromInput($id, 'WATER'));
+        $thrown = $this->dispatchExpectingFailure($this->container, SelectItem::fromInput($id, 'WATER'));
 
         self::assertInstanceOf(OutOfStockException::class, $thrown);
         self::assertCount(0, $this->documentsOfType('ItemVended'));
@@ -187,7 +184,7 @@ final class DomainEventPublicationTest extends TestCase
         $this->service($id);
         $this->insertCoin($id, 25);
 
-        $thrown = $this->dispatchExpectingFailure(SelectItem::fromInput($id, 'WATER'));
+        $thrown = $this->dispatchExpectingFailure($this->container, SelectItem::fromInput($id, 'WATER'));
 
         self::assertInstanceOf(InsufficientFundsException::class, $thrown);
         self::assertCount(0, $this->documentsOfType('ItemVended'));
@@ -195,7 +192,7 @@ final class DomainEventPublicationTest extends TestCase
 
     private function provision(): string
     {
-        $this->dispatch(new ProvisionVendingMachine());
+        $this->dispatch($this->container, new ProvisionVendingMachine());
 
         $documents = $this->documentsOfType('VendingMachineProvisioned');
         self::assertCount(1, $documents);
@@ -215,35 +212,12 @@ final class DomainEventPublicationTest extends TestCase
             ['denominationInCents' => 10, 'quantity' => 4],
         ],
     ): void {
-        $this->dispatch(ServiceVendingMachine::fromInput($id, $stock, $cashReserve));
+        $this->dispatch($this->container, ServiceVendingMachine::fromInput($id, $stock, $cashReserve));
     }
 
     private function insertCoin(string $id, int $denominationInCents): void
     {
-        $this->dispatch(InsertCoin::fromInput($id, $denominationInCents));
-    }
-
-    private function dispatch(object $command): void
-    {
-        $bus = $this->container->get('command.bus');
-        self::assertInstanceOf(MessageBusInterface::class, $bus);
-
-        $bus->dispatch($command);
-    }
-
-    /**
-     * Dispatches a command that is expected to be rejected and returns the
-     * domain exception, unwrapped from Messenger's `HandlerFailedException`.
-     */
-    private function dispatchExpectingFailure(object $command): Throwable
-    {
-        try {
-            $this->dispatch($command);
-        } catch (HandlerFailedException $exception) {
-            return $exception->getPrevious() ?? $exception;
-        }
-
-        self::fail('Expected the command to be rejected.');
+        $this->dispatch($this->container, InsertCoin::fromInput($id, $denominationInCents));
     }
 
     /**

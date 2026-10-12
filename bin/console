@@ -1,0 +1,16 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use App\Kernel\ContainerFactory;
+use Symfony\Component\Console\Application;
+
+require dirname(__DIR__) . '/vendor/autoload.php';
+
+$container = ContainerFactory::create();
+
+$application = new Application('vending-machine', 'bootstrap');
+$application->add($container->get(\App\VendingMachine\Infrastructure\Console\HealthCheckCommand::class));
+
+exit($application->run());

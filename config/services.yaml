@@ -1,0 +1,55 @@
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+        public: false
+
+    App\:
+        resource: '../src/*'
+        exclude:
+            - '../src/Kernel'
+            - '../src/VendingMachine/Domain/Model'
+            - '../src/VendingMachine/Domain/Exception'
+            - '../src/VendingMachine/Infrastructure/Persistence/Mongo/VendingMachineDocument.php'
+
+    App\VendingMachine\Infrastructure\Http\:
+        resource: '../src/VendingMachine/Infrastructure/Http'
+        public: true
+
+    App\VendingMachine\Infrastructure\Console\:
+        resource: '../src/VendingMachine/Infrastructure/Console'
+        public: true
+
+    # --- Ports -> adapters -------------------------------------------------
+    App\VendingMachine\Domain\Repository\VendingMachineRepository:
+        alias: App\VendingMachine\Infrastructure\Persistence\Mongo\MongoVendingMachineRepository
+
+    App\VendingMachine\Application\ReadModel\VendingMachineStateReadModelRepository:
+        alias: App\VendingMachine\Infrastructure\ReadModel\Redis\RedisVendingMachineStateReadModelRepository
+
+    # --- Third-party clients, built by hand-written factories --------------
+    Doctrine\ODM\MongoDB\DocumentManager:
+        factory: ['App\Kernel\DocumentManagerFactory', 'create']
+
+    Predis\ClientInterface:
+        factory: ['App\Kernel\RedisClientFactory', 'create']
+
+    # --- Command bus (Messenger, sync, in-memory) ---------------------------
+    Symfony\Component\Messenger\MessageBusInterface: '@command.bus'
+
+    command.bus:
+        class: Symfony\Component\Messenger\MessageBus
+        arguments:
+            - ['@command_bus.handle_message_middleware']
+
+    command_bus.handle_message_middleware:
+        class: Symfony\Component\Messenger\Middleware\HandleMessageMiddleware
+        arguments:
+            - '@command_bus.handlers_locator'
+
+    command_bus.handlers_locator:
+        class: Symfony\Component\Messenger\Handler\HandlersLocator
+        arguments:
+            -
+                App\VendingMachine\Application\HealthCheck\HealthCheck:
+                    - '@App\VendingMachine\Application\HealthCheck\HealthCheckHandler'

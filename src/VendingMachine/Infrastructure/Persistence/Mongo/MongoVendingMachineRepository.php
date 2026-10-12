@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Infrastructure\Persistence\Mongo;
 
+use App\VendingMachine\Domain\Model\CashReserve;
+use App\VendingMachine\Domain\Model\InsertedFunds;
 use App\VendingMachine\Domain\Model\Money;
 use App\VendingMachine\Domain\Model\Product;
+use App\VendingMachine\Domain\Model\Stock;
 use App\VendingMachine\Domain\Model\VendingMachine;
 use App\VendingMachine\Domain\Model\VendingMachineId;
 use App\VendingMachine\Domain\Repository\VendingMachineRepository;
@@ -33,10 +36,10 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
 
         return VendingMachine::reconstitute(
             $id,
-            Money::fromCents($document->balanceInCents),
+            InsertedFunds::of(Money::fromCents($document->insertedFundsInCents)),
+            Stock::fromProducts(self::stockFromDocument($document->stock)),
+            CashReserve::fromCounts(self::cashReserveFromDocument($document->cashReserve)),
             $document->version,
-            self::stockFromDocument($document->stock),
-            self::changeFromDocument($document->change),
         );
     }
 
@@ -49,9 +52,9 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
             $this->documentManager->persist($document);
         }
 
-        $document->balanceInCents = $vendingMachine->balance()->amountInCents();
-        $document->stock = self::stockToDocument($vendingMachine->stock());
-        $document->change = self::changeToDocument($vendingMachine->change());
+        $document->insertedFundsInCents = $vendingMachine->insertedFunds()->amount()->amountInCents();
+        $document->stock = self::stockToDocument($vendingMachine->stock()->products());
+        $document->cashReserve = self::cashReserveToDocument($vendingMachine->cashReserve()->counts());
 
         $this->documentManager->flush();
     }
@@ -76,13 +79,13 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
     /**
      * @param list<array{selectorCode: string, priceInCents: int, stock: int}> $stock
      *
-     * @return array<string, Product>
+     * @return list<Product>
      */
     private static function stockFromDocument(array $stock): array
     {
         $products = [];
         foreach ($stock as $row) {
-            $products[$row['selectorCode']] = Product::create(
+            $products[] = Product::create(
                 $row['selectorCode'],
                 Money::fromCents($row['priceInCents']),
                 $row['stock'],
@@ -93,14 +96,14 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
     }
 
     /**
-     * @param array<int, int> $change
+     * @param array<int, int> $cashReserve
      *
      * @return list<array{denominationInCents: int, quantity: int}>
      */
-    private static function changeToDocument(array $change): array
+    private static function cashReserveToDocument(array $cashReserve): array
     {
         $rows = [];
-        foreach ($change as $denominationInCents => $quantity) {
+        foreach ($cashReserve as $denominationInCents => $quantity) {
             $rows[] = [
                 'denominationInCents' => $denominationInCents,
                 'quantity' => $quantity,
@@ -111,17 +114,17 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
     }
 
     /**
-     * @param list<array{denominationInCents: int, quantity: int}> $change
+     * @param list<array{denominationInCents: int, quantity: int}> $cashReserve
      *
      * @return array<int, int>
      */
-    private static function changeFromDocument(array $change): array
+    private static function cashReserveFromDocument(array $cashReserve): array
     {
-        $reserves = [];
-        foreach ($change as $row) {
-            $reserves[$row['denominationInCents']] = $row['quantity'];
+        $counts = [];
+        foreach ($cashReserve as $row) {
+            $counts[$row['denominationInCents']] = $row['quantity'];
         }
 
-        return $reserves;
+        return $counts;
     }
 }

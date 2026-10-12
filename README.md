@@ -45,7 +45,8 @@ docker compose exec app php bin/console app:health-check
 
 ## Using it
 
-Provision a machine (empty stock, empty change, zero balance) and note its id:
+Provision a machine (empty stock, empty cash reserve, no inserted funds) and
+note its id:
 
 ```bash
 curl -s -X POST http://localhost:8000/vending-machines
@@ -61,7 +62,7 @@ flight.
 curl -s -X POST http://localhost:8000/vending-machines/$ID/service \
   -H 'Content-Type: application/json' \
   -d '{"stock":[{"selectorCode":"WATER","priceInCents":65,"stock":10}],
-       "change":[{"denominationInCents":100,"quantity":5}]}'
+       "cashReserve":[{"denominationInCents":100,"quantity":5}]}'
 ```
 
 Read the current state back from the Redis read model:
@@ -69,7 +70,7 @@ Read the current state back from the Redis read model:
 ```bash
 curl -s http://localhost:8000/vending-machines/$ID
 # -> {"id":"...","stock":[{"selectorCode":"WATER","priceInCents":65,"stock":10}],
-#     "change":[{"denominationInCents":100,"quantity":5}],"balanceInCents":0}
+#     "cashReserve":[{"denominationInCents":100,"quantity":5}],"insertedFundsInCents":0}
 ```
 
 The same three use cases are available through the CLI, dispatching the exact
@@ -79,7 +80,7 @@ same commands through the same bus:
 docker compose exec app php bin/console app:vending-machine:provision
 docker compose exec app php bin/console app:vending-machine:service $ID \
   --stock='[{"selectorCode":"WATER","priceInCents":65,"stock":10}]' \
-  --change='[{"denominationInCents":100,"quantity":5}]'
+  --cash-reserve='[{"denominationInCents":100,"quantity":5}]'
 docker compose exec app php bin/console app:vending-machine:show $ID
 ```
 
@@ -114,6 +115,12 @@ docker compose exec -e MONGO_DB=vending_test -e REDIS_URL=redis://redis:6379/1 \
 CI runs all three suites automatically on every push and pull request (see
 `.github/workflows/tests.yml`).
 
+## Domain language
+
+The vocabulary this codebase speaks — stock, cash reserve, inserted funds,
+pending transaction, service — is defined in [`CONTEXT.md`](./CONTEXT.md).
+Prefer those terms in code, comments and commits.
+
 ## Architecture
 
 ```
@@ -131,7 +138,7 @@ src/
     │   │                        # talks only to ports.
     │   ├── HealthCheck/         # Stack smoke test (command + handler + result)
     │   ├── ProvisionVendingMachine/  # Create a machine, seed the projection
-    │   ├── RestockVendingMachine/    # Service action: replace stock + change
+    │   ├── RestockVendingMachine/    # Service action: replace stock + cash reserve
     │   ├── GetVendingMachineState/   # Read-side query over the Redis projection
     │   └── ReadModel/           # Read-model port + MachineStateView
     └── Infrastructure/         # Adapters: the only place that knows about
@@ -209,7 +216,7 @@ straight from it without touching the write side.
 * The read-model port still speaks a raw state array; `MachineStateView` is the
   typed projection on top of it. Folding the DTO into the port signature is a
   natural next step once a second projection shape exists.
-* There is no customer-facing behaviour yet (inserting coins, selecting a
-  product, returning change), so a machine's balance can only become non-zero
-  by reconstructing it from persisted state — the mid-transaction guard is
-  therefore exercised with a seeded aggregate until the next slice lands.
+* There is no customer-facing use case yet (inserting funds and selecting a
+  product through the API, returning change). The aggregate can already record
+  inserted funds — and the mid-transaction guard is exercised through that —
+  but no driving adapter exposes insertion until the next slice lands.

@@ -45,7 +45,7 @@ final class RestockVendingMachineCommand extends Command
             '[]',
         );
         $this->addOption(
-            'change',
+            'cash-reserve',
             null,
             InputOption::VALUE_REQUIRED,
             'JSON list of {"denominationInCents","quantity"}.',
@@ -61,10 +61,10 @@ final class RestockVendingMachineCommand extends Command
             /** @var list<array{selectorCode: string, priceInCents: int, stock: int}> $stock */
             $stock = json_decode((string) $input->getOption('stock'), true, flags: JSON_THROW_ON_ERROR);
 
-            /** @var list<array{denominationInCents: int, quantity: int}> $change */
-            $change = json_decode((string) $input->getOption('change'), true, flags: JSON_THROW_ON_ERROR);
+            /** @var list<array{denominationInCents: int, quantity: int}> $cashReserve */
+            $cashReserve = json_decode((string) $input->getOption('cash-reserve'), true, flags: JSON_THROW_ON_ERROR);
 
-            $command = RestockVendingMachine::fromInput($id, $stock, $change);
+            $command = RestockVendingMachine::fromInput($id, $stock, $cashReserve);
         } catch (\Throwable $exception) {
             $output->writeln(json_encode([
                 'error' => 'InvalidRequest',

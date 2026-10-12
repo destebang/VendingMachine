@@ -28,7 +28,7 @@ final class VendingMachineCommandTest extends TestCase
 
         self::assertSame(0, $show->execute(['id' => $id]));
         self::assertSame(
-            ['id' => $id, 'stock' => [], 'change' => [], 'balanceInCents' => 0],
+            ['id' => $id, 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 0],
             json_decode($show->getDisplay(), true, flags: JSON_THROW_ON_ERROR),
         );
 
@@ -40,7 +40,7 @@ final class VendingMachineCommandTest extends TestCase
                 [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10]],
                 JSON_THROW_ON_ERROR,
             ),
-            '--change' => json_encode(
+            '--cash-reserve' => json_encode(
                 [['denominationInCents' => 100, 'quantity' => 5]],
                 JSON_THROW_ON_ERROR,
             ),
@@ -50,8 +50,8 @@ final class VendingMachineCommandTest extends TestCase
         self::assertSame([
             'id' => $id,
             'stock' => [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10]],
-            'change' => [['denominationInCents' => 100, 'quantity' => 5]],
-            'balanceInCents' => 0,
+            'cashReserve' => [['denominationInCents' => 100, 'quantity' => 5]],
+            'insertedFundsInCents' => 0,
         ], json_decode($show->getDisplay(), true, flags: JSON_THROW_ON_ERROR));
     }
 
@@ -73,7 +73,7 @@ final class VendingMachineCommandTest extends TestCase
         self::assertSame(1, $service->execute([
             'id' => VendingMachineId::generate()->toString(),
             '--stock' => '[]',
-            '--change' => '[]',
+            '--cash-reserve' => '[]',
         ]));
     }
 }

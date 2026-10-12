@@ -30,7 +30,7 @@ final class RestockVendingMachineHandler
             throw VendingMachineNotFoundException::withId($command->vendingMachineId);
         }
 
-        $vendingMachine->restock($command->stock, $command->change);
+        $vendingMachine->restock($command->stock, $command->cashReserve);
 
         $this->vendingMachineRepository->save($vendingMachine);
 

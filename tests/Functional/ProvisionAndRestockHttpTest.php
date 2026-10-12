@@ -39,13 +39,13 @@ final class ProvisionAndRestockHttpTest extends TestCase
 
         self::assertSame(Response::HTTP_OK, $initial->getStatusCode());
         self::assertSame(
-            ['id' => $id, 'stock' => [], 'change' => [], 'balanceInCents' => 0],
+            ['id' => $id, 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 0],
             json_decode((string) $initial->getContent(), true, flags: JSON_THROW_ON_ERROR),
         );
 
         $serviceResponse = $this->application->handle($this->serviceRequest($id, [
             'stock' => [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10]],
-            'change' => [['denominationInCents' => 100, 'quantity' => 5]],
+            'cashReserve' => [['denominationInCents' => 100, 'quantity' => 5]],
         ]));
 
         self::assertSame(Response::HTTP_OK, $serviceResponse->getStatusCode());
@@ -55,8 +55,8 @@ final class ProvisionAndRestockHttpTest extends TestCase
         self::assertSame([
             'id' => $id,
             'stock' => [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10]],
-            'change' => [['denominationInCents' => 100, 'quantity' => 5]],
-            'balanceInCents' => 0,
+            'cashReserve' => [['denominationInCents' => 100, 'quantity' => 5]],
+            'insertedFundsInCents' => 0,
         ], json_decode((string) $afterService->getContent(), true, flags: JSON_THROW_ON_ERROR));
     }
 
@@ -72,7 +72,7 @@ final class ProvisionAndRestockHttpTest extends TestCase
     public function test_servicing_an_unknown_machine_returns_not_found(): void
     {
         $response = $this->application->handle(
-            $this->serviceRequest(VendingMachineId::generate()->toString(), ['stock' => [], 'change' => []]),
+            $this->serviceRequest(VendingMachineId::generate()->toString(), ['stock' => [], 'cashReserve' => []]),
         );
 
         self::assertSame(Response::HTTP_NOT_FOUND, $response->getStatusCode());
@@ -83,11 +83,13 @@ final class ProvisionAndRestockHttpTest extends TestCase
         $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
         $id = VendingMachineId::generate();
 
-        $repository->save(VendingMachine::reconstitute($id, Money::fromCents(50), 0, [], []));
+        $machine = VendingMachine::create($id);
+        $machine->insertFunds(Money::fromCents(50));
+        $repository->save($machine);
 
         $response = $this->application->handle($this->serviceRequest($id->toString(), [
             'stock' => [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10]],
-            'change' => [],
+            'cashReserve' => [],
         ]));
 
         self::assertSame(Response::HTTP_CONFLICT, $response->getStatusCode());
@@ -99,8 +101,8 @@ final class ProvisionAndRestockHttpTest extends TestCase
         $stored = $repository->find($id);
 
         self::assertNotNull($stored);
-        self::assertSame([], $stored->stock());
-        self::assertSame([], $stored->change());
+        self::assertTrue($stored->stock()->isEmpty());
+        self::assertTrue($stored->cashReserve()->isEmpty());
     }
 
     /**

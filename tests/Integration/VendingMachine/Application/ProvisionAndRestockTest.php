@@ -12,8 +12,10 @@ use App\VendingMachine\Application\ReadModel\MachineStateView;
 use App\VendingMachine\Application\RestockVendingMachine\RestockVendingMachine;
 use App\VendingMachine\Application\RestockVendingMachine\RestockVendingMachineHandler;
 use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
+use App\VendingMachine\Domain\Model\CashReserve;
 use App\VendingMachine\Domain\Model\Money;
 use App\VendingMachine\Domain\Model\Product;
+use App\VendingMachine\Domain\Model\Stock;
 use App\VendingMachine\Domain\Model\VendingMachine;
 use App\VendingMachine\Domain\Model\VendingMachineId;
 use App\VendingMachine\Infrastructure\Persistence\Mongo\MongoVendingMachineRepository;
@@ -49,12 +51,12 @@ final class ProvisionAndRestockTest extends TestCase
         $stored = $this->repository->find(VendingMachineId::fromString($result->id()));
 
         self::assertNotNull($stored);
-        self::assertSame([], $stored->stock());
-        self::assertSame([], $stored->change());
-        self::assertTrue($stored->balance()->isZero());
+        self::assertTrue($stored->stock()->isEmpty());
+        self::assertTrue($stored->cashReserve()->isEmpty());
+        self::assertTrue($stored->insertedFunds()->isEmpty());
 
         self::assertSame(
-            ['id' => $result->id(), 'stock' => [], 'change' => [], 'balanceInCents' => 0],
+            ['id' => $result->id(), 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 0],
             $this->readModel->get($result->id()),
         );
     }
@@ -65,24 +67,24 @@ final class ProvisionAndRestockTest extends TestCase
 
         ($this->restock)(new RestockVendingMachine(
             VendingMachineId::fromString($id),
-            ['WATER' => Product::create('WATER', Money::fromCents(65), stock: 10)],
-            [100 => 5, 50 => 3],
+            Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
+            CashReserve::fromCounts([100 => 5, 50 => 3]),
         ));
 
         $stored = $this->repository->find(VendingMachineId::fromString($id));
 
         self::assertNotNull($stored);
-        self::assertSame(10, $stored->stock()['WATER']->stock());
-        self::assertSame([100 => 5, 50 => 3], $stored->change());
+        self::assertSame(10, $stored->stock()->quantityOf('WATER'));
+        self::assertSame([100 => 5, 50 => 3], $stored->cashReserve()->counts());
 
         self::assertSame([
             'id' => $id,
             'stock' => [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10]],
-            'change' => [
+            'cashReserve' => [
                 ['denominationInCents' => 100, 'quantity' => 5],
                 ['denominationInCents' => 50, 'quantity' => 3],
             ],
-            'balanceInCents' => 0,
+            'insertedFundsInCents' => 0,
         ], $this->readModel->get($id));
     }
 
@@ -92,26 +94,26 @@ final class ProvisionAndRestockTest extends TestCase
 
         ($this->restock)(new RestockVendingMachine(
             VendingMachineId::fromString($id),
-            [
-                'WATER' => Product::create('WATER', Money::fromCents(65), stock: 10),
-                'CHIPS' => Product::create('CHIPS', Money::fromCents(120), stock: 4),
-            ],
-            [100 => 5],
+            Stock::fromProducts([
+                Product::create('WATER', Money::fromCents(65), 10),
+                Product::create('CHIPS', Money::fromCents(120), 4),
+            ]),
+            CashReserve::fromCounts([100 => 5]),
         ));
 
         ($this->restock)(new RestockVendingMachine(
             VendingMachineId::fromString($id),
-            ['CHIPS' => Product::create('CHIPS', Money::fromCents(150), stock: 1)],
-            [50 => 2],
+            Stock::fromProducts([Product::create('CHIPS', Money::fromCents(150), 1)]),
+            CashReserve::fromCounts([50 => 2]),
         ));
 
         $stored = $this->repository->find(VendingMachineId::fromString($id));
 
         self::assertNotNull($stored);
-        self::assertSame(['CHIPS'], array_keys($stored->stock()));
-        self::assertSame(1, $stored->stock()['CHIPS']->stock());
-        self::assertSame(150, $stored->stock()['CHIPS']->price()->amountInCents());
-        self::assertSame([50 => 2], $stored->change());
+        self::assertSame(['CHIPS'], array_keys($stored->stock()->products()));
+        self::assertSame(1, $stored->stock()->quantityOf('CHIPS'));
+        self::assertSame(150, $stored->stock()->products()['CHIPS']->price()->amountInCents());
+        self::assertSame([50 => 2], $stored->cashReserve()->counts());
 
         $projected = $this->readModel->get($id);
 
@@ -119,13 +121,14 @@ final class ProvisionAndRestockTest extends TestCase
             [['selectorCode' => 'CHIPS', 'priceInCents' => 150, 'stock' => 1]],
             $projected['stock'],
         );
-        self::assertSame([['denominationInCents' => 50, 'quantity' => 2]], $projected['change']);
+        self::assertSame([['denominationInCents' => 50, 'quantity' => 2]], $projected['cashReserve']);
     }
 
     public function test_restock_is_rejected_and_changes_nothing_while_a_transaction_is_pending(): void
     {
         $id = VendingMachineId::generate();
-        $machine = VendingMachine::reconstitute($id, Money::fromCents(50), 0, [], []);
+        $machine = VendingMachine::create($id);
+        $machine->insertFunds(Money::fromCents(50));
 
         $this->repository->save($machine);
         $this->readModel->put($id->toString(), MachineStateView::fromAggregate($machine)->toArray());
@@ -133,8 +136,8 @@ final class ProvisionAndRestockTest extends TestCase
         try {
             ($this->restock)(new RestockVendingMachine(
                 $id,
-                ['WATER' => Product::create('WATER', Money::fromCents(65), stock: 10)],
-                [100 => 5],
+                Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
+                CashReserve::fromCounts([100 => 5]),
             ));
             self::fail('Expected the service action to be rejected while a transaction is pending.');
         } catch (PendingTransactionInProgressException) {
@@ -143,11 +146,11 @@ final class ProvisionAndRestockTest extends TestCase
 
         $stored = $this->repository->find($id);
         self::assertNotNull($stored);
-        self::assertSame([], $stored->stock());
-        self::assertSame([], $stored->change());
+        self::assertTrue($stored->stock()->isEmpty());
+        self::assertTrue($stored->cashReserve()->isEmpty());
 
         self::assertSame(
-            ['id' => $id->toString(), 'stock' => [], 'change' => [], 'balanceInCents' => 50],
+            ['id' => $id->toString(), 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 50],
             $this->readModel->get($id->toString()),
         );
     }

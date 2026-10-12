@@ -19,13 +19,13 @@ final class MachineStateView
 {
     /**
      * @param list<array{selectorCode: string, priceInCents: int, stock: int}> $stock
-     * @param list<array{denominationInCents: int, quantity: int}>            $change
+     * @param list<array{denominationInCents: int, quantity: int}>            $cashReserve
      */
     public function __construct(
         public readonly string $id,
         public readonly array $stock,
-        public readonly array $change,
-        public readonly int $balanceInCents,
+        public readonly array $cashReserve,
+        public readonly int $insertedFundsInCents,
     ) {
     }
 
@@ -37,12 +37,12 @@ final class MachineStateView
                 'priceInCents' => $product->price()->amountInCents(),
                 'stock' => $product->stock(),
             ],
-            array_values($vendingMachine->stock()),
+            array_values($vendingMachine->stock()->products()),
         );
 
-        $change = [];
-        foreach ($vendingMachine->change() as $denominationInCents => $quantity) {
-            $change[] = [
+        $cashReserve = [];
+        foreach ($vendingMachine->cashReserve()->counts() as $denominationInCents => $quantity) {
+            $cashReserve[] = [
                 'denominationInCents' => $denominationInCents,
                 'quantity' => $quantity,
             ];
@@ -51,8 +51,8 @@ final class MachineStateView
         return new self(
             id: $vendingMachine->id()->toString(),
             stock: array_values($stock),
-            change: $change,
-            balanceInCents: $vendingMachine->balance()->amountInCents(),
+            cashReserve: $cashReserve,
+            insertedFundsInCents: $vendingMachine->insertedFunds()->amount()->amountInCents(),
         );
     }
 
@@ -64,14 +64,14 @@ final class MachineStateView
         /** @var list<array{selectorCode: string, priceInCents: int, stock: int}> $stock */
         $stock = $state['stock'] ?? [];
 
-        /** @var list<array{denominationInCents: int, quantity: int}> $change */
-        $change = $state['change'] ?? [];
+        /** @var list<array{denominationInCents: int, quantity: int}> $cashReserve */
+        $cashReserve = $state['cashReserve'] ?? [];
 
         return new self(
             id: (string) ($state['id'] ?? ''),
             stock: $stock,
-            change: $change,
-            balanceInCents: (int) ($state['balanceInCents'] ?? 0),
+            cashReserve: $cashReserve,
+            insertedFundsInCents: (int) ($state['insertedFundsInCents'] ?? 0),
         );
     }
 
@@ -79,8 +79,8 @@ final class MachineStateView
      * @return array{
      *     id: string,
      *     stock: list<array{selectorCode: string, priceInCents: int, stock: int}>,
-     *     change: list<array{denominationInCents: int, quantity: int}>,
-     *     balanceInCents: int
+     *     cashReserve: list<array{denominationInCents: int, quantity: int}>,
+     *     insertedFundsInCents: int
      * }
      */
     public function toArray(): array
@@ -88,8 +88,8 @@ final class MachineStateView
         return [
             'id' => $this->id,
             'stock' => $this->stock,
-            'change' => $this->change,
-            'balanceInCents' => $this->balanceInCents,
+            'cashReserve' => $this->cashReserve,
+            'insertedFundsInCents' => $this->insertedFundsInCents,
         ];
     }
 }

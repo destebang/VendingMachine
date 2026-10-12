@@ -32,10 +32,10 @@ final class RestockVendingMachineController
     public function __invoke(Request $request, string $id): JsonResponse
     {
         try {
-            /** @var array{stock?: list<array{selectorCode: string, priceInCents: int, stock: int}>, change?: list<array{denominationInCents: int, quantity: int}>} $payload */
+            /** @var array{stock?: list<array{selectorCode: string, priceInCents: int, stock: int}>, cashReserve?: list<array{denominationInCents: int, quantity: int}>} $payload */
             $payload = json_decode((string) $request->getContent(), true, flags: JSON_THROW_ON_ERROR);
 
-            $command = RestockVendingMachine::fromInput($id, $payload['stock'] ?? [], $payload['change'] ?? []);
+            $command = RestockVendingMachine::fromInput($id, $payload['stock'] ?? [], $payload['cashReserve'] ?? []);
         } catch (Throwable $exception) {
             return new JsonResponse([
                 'error' => 'InvalidRequest',

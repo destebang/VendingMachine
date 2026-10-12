@@ -9,67 +9,45 @@ use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
 /**
  * Write-side aggregate root for a single vending machine.
  *
- * It carries identity, the item stock, the coin reserve, any money a customer
- * has inserted so far, and the optimistic concurrency version expected by the
- * repository/persistence layer. Business behaviour is added use case by use
- * case on top of this skeleton.
+ * It carries identity, the stock it holds, the cash reserve it pays change
+ * from, the funds a customer has inserted so far, and the optimistic
+ * concurrency version expected by the repository/persistence layer. Each
+ * collection is a value object rather than a raw array, so its invariants and
+ * shape live here instead of being re-derived by the projection and the
+ * repository.
  */
 final class VendingMachine
 {
-    /**
-     * Items currently loaded in the machine, keyed by selector code.
-     *
-     * @var array<string, Product>
-     */
-    private array $stock;
-
-    /**
-     * Physical coin/note reserve, keyed by denomination (integer minor
-     * units) with the number of units held as the value.
-     *
-     * @var array<int, int>
-     */
-    private array $change;
-
-    /**
-     * @param array<string, Product> $stock
-     * @param array<int, int>       $change
-     */
     private function __construct(
         private readonly VendingMachineId $id,
-        private Money $balance,
+        private InsertedFunds $insertedFunds,
+        private Stock $stock,
+        private CashReserve $cashReserve,
         private int $version,
-        array $stock,
-        array $change,
     ) {
-        $this->stock = $stock;
-        $this->change = $change;
     }
 
     /**
-     * A brand-new, unstocked machine: empty stock, empty change, zero
-     * balance.
+     * A brand-new, unstocked machine: empty stock, empty reserve, no inserted
+     * funds.
      */
     public static function create(VendingMachineId $id): self
     {
-        return new self($id, Money::zero(), 0, [], []);
+        return new self($id, InsertedFunds::none(), Stock::empty(), CashReserve::empty(), 0);
     }
 
     /**
      * Reconstructs an aggregate from persisted state, e.g. when loaded by a
      * repository. Not for application code to call directly.
-     *
-     * @param array<string, Product> $stock
-     * @param array<int, int>       $change
      */
     public static function reconstitute(
         VendingMachineId $id,
-        Money $balance,
+        InsertedFunds $insertedFunds,
+        Stock $stock,
+        CashReserve $cashReserve,
         int $version,
-        array $stock,
-        array $change,
     ): self {
-        return new self($id, $balance, $version, $stock, $change);
+        return new self($id, $insertedFunds, $stock, $cashReserve, $version);
     }
 
     public function id(): VendingMachineId
@@ -82,55 +60,55 @@ final class VendingMachine
         return $this->version;
     }
 
-    public function balance(): Money
+    public function insertedFunds(): InsertedFunds
     {
-        return $this->balance;
+        return $this->insertedFunds;
     }
 
-    /**
-     * @return array<string, Product>
-     */
-    public function stock(): array
+    public function stock(): Stock
     {
         return $this->stock;
     }
 
-    /**
-     * @return array<int, int>
-     */
-    public function change(): array
+    public function cashReserve(): CashReserve
     {
-        return $this->change;
+        return $this->cashReserve;
     }
 
     /**
-     * Service action: replaces the whole item stock and coin reserve with the
-     * state the technician declares. Replace, not additive — the technician
-     * reports the true current physical state, never a delta.
+     * Records money the customer has put into the machine. The only way
+     * inserted funds grow.
+     */
+    public function insertFunds(Money $amount): void
+    {
+        $this->insertedFunds = $this->insertedFunds->plus($amount);
+    }
+
+    /**
+     * Service action: replaces the whole stock and cash reserve with the state
+     * the technician declares. Replace, not additive — the technician reports
+     * the true current physical state, never a delta.
      *
      * Rejected while a customer transaction is in flight, so a service visit
-     * can never rewrite the machine out from under an inserted balance.
-     *
-     * @param array<string, Product> $stock
-     * @param array<int, int>       $change denomination in cents => quantity
+     * can never rewrite the machine out from under inserted funds.
      */
-    public function restock(array $stock, array $change): void
+    public function restock(Stock $stock, CashReserve $cashReserve): void
     {
         if ($this->hasPendingTransaction()) {
             throw PendingTransactionInProgressException::cannotRestock($this->id);
         }
 
         $this->stock = $stock;
-        $this->change = $change;
+        $this->cashReserve = $cashReserve;
     }
 
     /**
-     * True while a customer has money inserted and the transaction has not
+     * True while a customer has inserted funds and the transaction has not
      * been completed or cancelled yet.
      */
     public function hasPendingTransaction(): bool
     {
-        return !$this->balance->isZero();
+        return !$this->insertedFunds->isEmpty();
     }
 
     /**

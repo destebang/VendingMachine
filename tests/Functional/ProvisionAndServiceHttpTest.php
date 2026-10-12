@@ -15,7 +15,7 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
-final class ProvisionAndRestockHttpTest extends TestCase
+final class ProvisionAndServiceHttpTest extends TestCase
 {
     private HttpApplication $application;
 

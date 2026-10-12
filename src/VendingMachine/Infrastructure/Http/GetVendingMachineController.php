@@ -12,7 +12,7 @@ use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
  * `GET /vending-machines/{id}` — returns the current projected state (stock,
- * change, balance) from the Redis read model.
+ * cash reserve, inserted funds) from the Redis read model.
  */
 final class GetVendingMachineController
 {

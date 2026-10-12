@@ -9,8 +9,8 @@ use App\Kernel\RedisClientFactory;
 use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachine;
 use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachineHandler;
 use App\VendingMachine\Application\ReadModel\MachineStateView;
-use App\VendingMachine\Application\RestockVendingMachine\RestockVendingMachine;
-use App\VendingMachine\Application\RestockVendingMachine\RestockVendingMachineHandler;
+use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachine;
+use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachineHandler;
 use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
 use App\VendingMachine\Domain\Model\CashReserve;
 use App\VendingMachine\Domain\Model\Money;
@@ -26,7 +26,7 @@ use PHPUnit\Framework\TestCase;
  * Exercises the provision and service use cases against the real MongoDB write
  * model and the real Redis read model, with no in-memory doubles.
  */
-final class ProvisionAndRestockTest extends TestCase
+final class ProvisionAndServiceTest extends TestCase
 {
     private MongoVendingMachineRepository $repository;
 
@@ -34,14 +34,14 @@ final class ProvisionAndRestockTest extends TestCase
 
     private ProvisionVendingMachineHandler $provision;
 
-    private RestockVendingMachineHandler $restock;
+    private ServiceVendingMachineHandler $service;
 
     protected function setUp(): void
     {
         $this->repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
         $this->readModel = new RedisVendingMachineStateReadModelRepository(RedisClientFactory::create());
         $this->provision = new ProvisionVendingMachineHandler($this->repository, $this->readModel);
-        $this->restock = new RestockVendingMachineHandler($this->repository, $this->readModel);
+        $this->service = new ServiceVendingMachineHandler($this->repository, $this->readModel);
     }
 
     public function test_provisioning_persists_an_empty_machine_and_its_projection(): void
@@ -61,11 +61,11 @@ final class ProvisionAndRestockTest extends TestCase
         );
     }
 
-    public function test_restock_updates_the_write_model_and_the_projection(): void
+    public function test_service_updates_the_write_model_and_the_projection(): void
     {
         $id = ($this->provision)(new ProvisionVendingMachine())->id();
 
-        ($this->restock)(new RestockVendingMachine(
+        ($this->service)(new ServiceVendingMachine(
             VendingMachineId::fromString($id),
             Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
             CashReserve::fromCounts([100 => 5, 50 => 3]),
@@ -88,11 +88,11 @@ final class ProvisionAndRestockTest extends TestCase
         ], $this->readModel->get($id));
     }
 
-    public function test_restock_replaces_the_previous_state(): void
+    public function test_service_replaces_the_previous_state(): void
     {
         $id = ($this->provision)(new ProvisionVendingMachine())->id();
 
-        ($this->restock)(new RestockVendingMachine(
+        ($this->service)(new ServiceVendingMachine(
             VendingMachineId::fromString($id),
             Stock::fromProducts([
                 Product::create('WATER', Money::fromCents(65), 10),
@@ -101,7 +101,7 @@ final class ProvisionAndRestockTest extends TestCase
             CashReserve::fromCounts([100 => 5]),
         ));
 
-        ($this->restock)(new RestockVendingMachine(
+        ($this->service)(new ServiceVendingMachine(
             VendingMachineId::fromString($id),
             Stock::fromProducts([Product::create('CHIPS', Money::fromCents(150), 1)]),
             CashReserve::fromCounts([50 => 2]),
@@ -124,7 +124,7 @@ final class ProvisionAndRestockTest extends TestCase
         self::assertSame([['denominationInCents' => 50, 'quantity' => 2]], $projected['cashReserve']);
     }
 
-    public function test_restock_is_rejected_and_changes_nothing_while_a_transaction_is_pending(): void
+    public function test_service_is_rejected_and_changes_nothing_while_a_transaction_is_pending(): void
     {
         $id = VendingMachineId::generate();
         $machine = VendingMachine::create($id);
@@ -134,7 +134,7 @@ final class ProvisionAndRestockTest extends TestCase
         $this->readModel->put($id->toString(), MachineStateView::fromAggregate($machine)->toArray());
 
         try {
-            ($this->restock)(new RestockVendingMachine(
+            ($this->service)(new ServiceVendingMachine(
                 $id,
                 Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
                 CashReserve::fromCounts([100 => 5]),

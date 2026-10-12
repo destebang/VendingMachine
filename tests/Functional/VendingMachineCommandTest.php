@@ -8,7 +8,7 @@ use App\Kernel\ContainerFactory;
 use App\VendingMachine\Domain\Model\VendingMachineId;
 use App\VendingMachine\Infrastructure\Console\GetVendingMachineCommand;
 use App\VendingMachine\Infrastructure\Console\ProvisionVendingMachineCommand;
-use App\VendingMachine\Infrastructure\Console\RestockVendingMachineCommand;
+use App\VendingMachine\Infrastructure\Console\ServiceVendingMachineCommand;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Tester\CommandTester;
 
@@ -32,7 +32,7 @@ final class VendingMachineCommandTest extends TestCase
             json_decode($show->getDisplay(), true, flags: JSON_THROW_ON_ERROR),
         );
 
-        $service = new CommandTester($container->get(RestockVendingMachineCommand::class));
+        $service = new CommandTester($container->get(ServiceVendingMachineCommand::class));
 
         self::assertSame(0, $service->execute([
             'id' => $id,
@@ -68,7 +68,7 @@ final class VendingMachineCommandTest extends TestCase
     {
         $container = ContainerFactory::create();
 
-        $service = new CommandTester($container->get(RestockVendingMachineCommand::class));
+        $service = new CommandTester($container->get(ServiceVendingMachineCommand::class));
 
         self::assertSame(1, $service->execute([
             'id' => VendingMachineId::generate()->toString(),

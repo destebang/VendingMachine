@@ -16,7 +16,7 @@ use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
  * CLI equivalent of `GET /vending-machines/{id}`: prints the machine's current
- * projected state (stock, change, balance) from the read model.
+ * projected state (stock, cash reserve, inserted funds) from the read model.
  */
 #[AsCommand(name: 'app:vending-machine:show', description: 'Prints a machine\'s current state from the read model.')]
 final class GetVendingMachineCommand extends Command

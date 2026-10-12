@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\VendingMachine\Application\RestockVendingMachine;
+namespace App\VendingMachine\Application\ServiceVendingMachine;
 
 use App\VendingMachine\Domain\Model\CashReserve;
 use App\VendingMachine\Domain\Model\Money;
@@ -14,7 +14,7 @@ use App\VendingMachine\Domain\Model\VendingMachineId;
  * Service action: declare the true physical state of a machine's stock and cash
  * reserve. Semantics are replace, not additive.
  */
-final class RestockVendingMachine
+final class ServiceVendingMachine
 {
     public function __construct(
         public readonly VendingMachineId $vendingMachineId,

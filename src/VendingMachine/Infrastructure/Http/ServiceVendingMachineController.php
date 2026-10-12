@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\VendingMachine\Infrastructure\Http;
 
 use App\VendingMachine\Application\Exception\VendingMachineNotFoundException;
-use App\VendingMachine\Application\RestockVendingMachine\RestockVendingMachine;
-use App\VendingMachine\Application\RestockVendingMachine\RestockVendingMachineResult;
+use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachine;
+use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachineResult;
 use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -17,10 +17,10 @@ use Throwable;
 
 /**
  * `POST /vending-machines/{id}/service` — the technician declares the machine's
- * true item stock and coin reserve (replace semantics) and gets the resulting
- * state back.
+ * true stock and cash reserve (replace semantics) and gets the resulting state
+ * back.
  */
-final class RestockVendingMachineController
+final class ServiceVendingMachineController
 {
     use HandleTrait;
 
@@ -35,7 +35,7 @@ final class RestockVendingMachineController
             /** @var array{stock?: list<array{selectorCode: string, priceInCents: int, stock: int}>, cashReserve?: list<array{denominationInCents: int, quantity: int}>} $payload */
             $payload = json_decode((string) $request->getContent(), true, flags: JSON_THROW_ON_ERROR);
 
-            $command = RestockVendingMachine::fromInput($id, $payload['stock'] ?? [], $payload['cashReserve'] ?? []);
+            $command = ServiceVendingMachine::fromInput($id, $payload['stock'] ?? [], $payload['cashReserve'] ?? []);
         } catch (Throwable $exception) {
             return new JsonResponse([
                 'error' => 'InvalidRequest',
@@ -44,7 +44,7 @@ final class RestockVendingMachineController
         }
 
         try {
-            /** @var RestockVendingMachineResult $result */
+            /** @var ServiceVendingMachineResult $result */
             $result = $this->handle($command);
         } catch (HandlerFailedException $transportException) {
             return $this->errorResponse($transportException);

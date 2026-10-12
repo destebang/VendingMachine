@@ -58,16 +58,16 @@ final class VendingMachineTest extends TestCase
         self::assertSame(50, $machine->insertedFunds()->amount()->amountInCents());
     }
 
-    public function test_restock_replaces_rather_than_adds_to_stock_and_reserve(): void
+    public function test_service_replaces_rather_than_adds_to_stock_and_reserve(): void
     {
         $machine = VendingMachine::create(VendingMachineId::generate());
 
-        $machine->restock(
+        $machine->service(
             Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
             CashReserve::fromCounts([100 => 5]),
         );
 
-        $machine->restock(
+        $machine->service(
             Stock::fromProducts([Product::create('CHIPS', Money::fromCents(120), 2)]),
             CashReserve::fromCounts([50 => 1]),
         );
@@ -77,20 +77,20 @@ final class VendingMachineTest extends TestCase
         self::assertSame([50 => 1], $machine->cashReserve()->counts());
     }
 
-    public function test_restock_is_rejected_while_a_transaction_is_pending(): void
+    public function test_service_is_rejected_while_a_transaction_is_pending(): void
     {
         $machine = VendingMachine::create(VendingMachineId::generate());
         $machine->insertFunds(Money::fromCents(50));
 
         $this->expectException(PendingTransactionInProgressException::class);
 
-        $machine->restock(
+        $machine->service(
             Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
             CashReserve::fromCounts([100 => 5]),
         );
     }
 
-    public function test_restock_leaves_state_untouched_when_rejected(): void
+    public function test_service_leaves_state_untouched_when_rejected(): void
     {
         $machine = VendingMachine::reconstitute(
             VendingMachineId::generate(),
@@ -101,7 +101,7 @@ final class VendingMachineTest extends TestCase
         );
 
         try {
-            $machine->restock(
+            $machine->service(
                 Stock::fromProducts([Product::create('CHIPS', Money::fromCents(120), 10)]),
                 CashReserve::fromCounts([50 => 9]),
             );

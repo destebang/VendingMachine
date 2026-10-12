@@ -92,10 +92,10 @@ final class VendingMachine
      * Rejected while a customer transaction is in flight, so a service visit
      * can never rewrite the machine out from under inserted funds.
      */
-    public function restock(Stock $stock, CashReserve $cashReserve): void
+    public function service(Stock $stock, CashReserve $cashReserve): void
     {
         if ($this->hasPendingTransaction()) {
-            throw PendingTransactionInProgressException::cannotRestock($this->id);
+            throw PendingTransactionInProgressException::cannotService($this->id);
         }
 
         $this->stock = $stock;

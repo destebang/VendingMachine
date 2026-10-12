@@ -102,7 +102,7 @@ docker compose exec -e MONGO_DB=vending_test -e REDIS_URL=redis://redis:6379/1 \
 
 * **Unit** (`tests/Unit`) — domain value objects and entities
   (`Money`, `Denomination`, `Product`, `VendingMachine`), exercised in
-  isolation with no I/O, including the restock replace semantics and the
+  isolation with no I/O, including the service replace semantics and the
   mid-transaction rejection.
 * **Integration** (`tests/Integration`) — the MongoDB repository, the Redis
   read-model repository and the provision/service use cases against real
@@ -138,7 +138,7 @@ src/
     │   │                        # talks only to ports.
     │   ├── HealthCheck/         # Stack smoke test (command + handler + result)
     │   ├── ProvisionVendingMachine/  # Create a machine, seed the projection
-    │   ├── RestockVendingMachine/    # Service action: replace stock + cash reserve
+    │   ├── ServiceVendingMachine/    # Service action: replace stock + cash reserve
     │   ├── GetVendingMachineState/   # Read-side query over the Redis projection
     │   └── ReadModel/           # Read-model port + MachineStateView
     └── Infrastructure/         # Adapters: the only place that knows about
@@ -173,7 +173,7 @@ A single Symfony Messenger command bus (`config/services.yaml`,
 `command.bus`) is configured with a synchronous, in-memory
 `HandlersLocator`. Every use case is a command or query dispatched through it
 and handled by exactly one handler: `ProvisionVendingMachine`,
-`RestockVendingMachine`, the `GetVendingMachineState` query and the
+`ServiceVendingMachine`, the `GetVendingMachineState` query and the
 `HealthCheck` smoke test all go through it. The remaining vending-machine
 commands (insert coin, select product, return coin) will follow the same
 shape.

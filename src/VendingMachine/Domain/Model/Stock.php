@@ -9,7 +9,7 @@ namespace App\VendingMachine\Domain\Model;
  *
  * A domain collection instead of a raw array, so the rule that a selector code
  * identifies exactly one loaded product lives in a single place. The products
- * it holds are the same `Product` entities as before.
+ * it holds are the `Product` entities themselves.
  */
 final class Stock
 {

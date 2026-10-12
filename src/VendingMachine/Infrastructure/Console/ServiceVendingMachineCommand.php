@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Infrastructure\Console;
 
-use App\VendingMachine\Application\Exception\VendingMachineNotFoundException;
 use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachine;
 use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachineResult;
 use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
+use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;

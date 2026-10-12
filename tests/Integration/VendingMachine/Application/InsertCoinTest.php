@@ -6,12 +6,12 @@ namespace App\Tests\Integration\VendingMachine\Application;
 
 use App\Kernel\DocumentManagerFactory;
 use App\Kernel\RedisClientFactory;
-use App\VendingMachine\Application\Exception\VendingMachineNotFoundException;
 use App\VendingMachine\Application\InsertCoin\InsertCoin;
 use App\VendingMachine\Application\InsertCoin\InsertCoinHandler;
 use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachine;
 use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachineHandler;
 use App\VendingMachine\Domain\Exception\InvalidDenominationException;
+use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
 use App\VendingMachine\Domain\Model\VendingMachineId;
 use App\VendingMachine\Infrastructure\Persistence\Mongo\MongoVendingMachineRepository;
 use App\VendingMachine\Infrastructure\ReadModel\Redis\RedisVendingMachineStateReadModelRepository;

@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Infrastructure\Http;
 
-use App\VendingMachine\Application\Exception\VendingMachineNotFoundException;
 use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachine;
 use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachineResult;
 use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
+use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Messenger\Exception\HandlerFailedException;

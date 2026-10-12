@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Infrastructure\Http;
 
-use App\VendingMachine\Application\Exception\VendingMachineNotFoundException;
 use App\VendingMachine\Application\InsertCoin\InsertCoin;
 use App\VendingMachine\Application\InsertCoin\InsertCoinResult;
 use App\VendingMachine\Domain\Exception\InvalidDenominationException;
+use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Messenger\Exception\HandlerFailedException;

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Application\InsertCoin;
 
-use App\VendingMachine\Application\Exception\VendingMachineNotFoundException;
 use App\VendingMachine\Application\ReadModel\MachineStateView;
 use App\VendingMachine\Application\ReadModel\VendingMachineStateReadModelRepository;
 use App\VendingMachine\Domain\Repository\VendingMachineRepository;
@@ -16,7 +15,8 @@ use App\VendingMachine\Domain\Repository\VendingMachineRepository;
  *
  * A denomination the machine does not accept is rejected by the domain and that
  * rejection propagates untouched, leaving both the write model and the
- * projection unchanged.
+ * projection unchanged; a missing machine surfaces as
+ * `VendingMachineNotFoundException`.
  */
 final class InsertCoinHandler
 {
@@ -28,11 +28,7 @@ final class InsertCoinHandler
 
     public function __invoke(InsertCoin $command): InsertCoinResult
     {
-        $vendingMachine = $this->vendingMachineRepository->find($command->vendingMachineId);
-
-        if ($vendingMachine === null) {
-            throw VendingMachineNotFoundException::withId($command->vendingMachineId);
-        }
+        $vendingMachine = $this->vendingMachineRepository->get($command->vendingMachineId);
 
         $vendingMachine->insertCoin($command->denomination);
 

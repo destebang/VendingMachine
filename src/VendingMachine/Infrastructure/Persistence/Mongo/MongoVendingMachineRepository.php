@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Infrastructure\Persistence\Mongo;
 
+use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
 use App\VendingMachine\Domain\Model\CashReserve;
 use App\VendingMachine\Domain\Model\InsertedFunds;
 use App\VendingMachine\Domain\Model\Money;
@@ -41,6 +42,11 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
             CashReserve::fromCounts(self::cashReserveFromDocument($document->cashReserve)),
             $document->version,
         );
+    }
+
+    public function get(VendingMachineId $id): VendingMachine
+    {
+        return $this->find($id) ?? throw VendingMachineNotFoundException::withId($id);
     }
 
     public function save(VendingMachine $vendingMachine): void

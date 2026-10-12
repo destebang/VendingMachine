@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Domain\Model;
 
-use App\VendingMachine\Domain\Exception\InsufficientStockException;
+use App\VendingMachine\Domain\Exception\OutOfStockException;
 
 /**
  * A product a vending machine can sell: a selector code (the button a
@@ -51,7 +51,7 @@ final class Product
     public function decreaseStock(): void
     {
         if (!$this->isInStock()) {
-            throw InsufficientStockException::forProduct($this->selectorCode);
+            throw OutOfStockException::forProduct($this->selectorCode);
         }
 
         $this->stock--;

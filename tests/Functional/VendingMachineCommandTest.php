@@ -9,6 +9,7 @@ use App\VendingMachine\Domain\Model\VendingMachineId;
 use App\VendingMachine\Infrastructure\Console\GetVendingMachineCommand;
 use App\VendingMachine\Infrastructure\Console\InsertCoinCommand;
 use App\VendingMachine\Infrastructure\Console\ProvisionVendingMachineCommand;
+use App\VendingMachine\Infrastructure\Console\SelectItemCommand;
 use App\VendingMachine\Infrastructure\Console\ServiceVendingMachineCommand;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Tester\CommandTester;
@@ -108,6 +109,78 @@ final class VendingMachineCommandTest extends TestCase
             'id' => VendingMachineId::generate()->toString(),
             '--denomination-in-cents' => '25',
         ]));
+    }
+
+    public function test_the_cli_can_vend_an_item_and_return_change(): void
+    {
+        $container = ContainerFactory::create();
+        $id = $this->servicedMachine($container);
+
+        $insertCoin = new CommandTester($container->get(InsertCoinCommand::class));
+        self::assertSame(0, $insertCoin->execute(['id' => $id, '--denomination-in-cents' => '100']));
+
+        $select = new CommandTester($container->get(SelectItemCommand::class));
+
+        self::assertSame(0, $select->execute(['id' => $id, 'selector-code' => 'WATER']));
+        self::assertSame([
+            'id' => $id,
+            'selectorCode' => 'WATER',
+            'priceInCents' => 65,
+            'change' => [25, 10],
+            'insertedFundsInCents' => 0,
+        ], json_decode($select->getDisplay(), true, flags: JSON_THROW_ON_ERROR));
+    }
+
+    public function test_the_cli_reports_a_rejected_selection(): void
+    {
+        $container = ContainerFactory::create();
+        $id = $this->servicedMachine($container);
+
+        $select = new CommandTester($container->get(SelectItemCommand::class));
+
+        self::assertSame(1, $select->execute(['id' => $id, 'selector-code' => 'WATER']));
+        self::assertSame(
+            'InsufficientFunds',
+            json_decode($select->getDisplay(), true, flags: JSON_THROW_ON_ERROR)['error'],
+        );
+    }
+
+    public function test_selecting_on_an_unknown_machine_fails(): void
+    {
+        $container = ContainerFactory::create();
+
+        $select = new CommandTester($container->get(SelectItemCommand::class));
+
+        self::assertSame(1, $select->execute([
+            'id' => VendingMachineId::generate()->toString(),
+            'selector-code' => 'WATER',
+        ]));
+    }
+
+    private function servicedMachine(\Psr\Container\ContainerInterface $container): string
+    {
+        $provision = new CommandTester($container->get(ProvisionVendingMachineCommand::class));
+        $provision->execute([]);
+
+        $id = json_decode($provision->getDisplay(), true, flags: JSON_THROW_ON_ERROR)['id'];
+
+        $service = new CommandTester($container->get(ServiceVendingMachineCommand::class));
+        $service->execute([
+            'id' => $id,
+            '--stock' => json_encode(
+                [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10]],
+                JSON_THROW_ON_ERROR,
+            ),
+            '--cash-reserve' => json_encode(
+                [
+                    ['denominationInCents' => 25, 'quantity' => 40],
+                    ['denominationInCents' => 10, 'quantity' => 40],
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+        ]);
+
+        return $id;
     }
 
     public function test_showing_an_unknown_machine_fails(): void

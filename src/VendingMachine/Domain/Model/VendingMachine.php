@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Domain\Model;
 
+use App\VendingMachine\Domain\Exception\InsufficientChangeAvailableException;
+use App\VendingMachine\Domain\Exception\InsufficientFundsException;
 use App\VendingMachine\Domain\Exception\InvalidDenominationException;
+use App\VendingMachine\Domain\Exception\OutOfStockException;
 use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
 
 /**
@@ -95,6 +98,57 @@ final class VendingMachine
         }
 
         $this->insertedFunds = $this->insertedFunds->plus($coin->amount());
+    }
+
+    /**
+     * Customer action: selects the product with the given selector code, pays
+     * for it out of the inserted funds and hands back any change due.
+     *
+     * The change is made from the cash reserve, never from the coins the
+     * customer just inserted. On success the stock and cash reserve are
+     * decremented and the inserted funds are reset; the vended product and the
+     * change handed back are returned so the caller can report them.
+     *
+     * Rejected with a clear error, and a clear effect on the inserted funds:
+     * - an unstocked or sold-out selector code (`OutOfStockException`) leaves the
+     *   inserted funds untouched;
+     * - a price above the inserted funds (`InsufficientFundsException`) leaves
+     *   the inserted funds untouched so the customer can top up;
+     * - change the reserve cannot make (`InsufficientChangeAvailableException`)
+     *   returns every inserted coin, resetting the balance to zero.
+     */
+    public function selectItem(string $selectorCode): VendedItem
+    {
+        $product = $this->stock->product($selectorCode);
+
+        if ($product === null || !$product->isInStock()) {
+            throw OutOfStockException::forProduct($selectorCode);
+        }
+
+        $price = $product->price();
+        $inserted = $this->insertedFunds->amount();
+
+        if (!$inserted->isGreaterThanOrEqualTo($price)) {
+            throw InsufficientFundsException::forProduct($selectorCode, $price, $inserted);
+        }
+
+        $changeDue = $inserted->subtract($price);
+
+        if (!$this->cashReserve->canMake($changeDue)) {
+            // Exact change only: the machine cannot make the required change, so
+            // the sale is rejected and every inserted coin is handed back.
+            $this->insertedFunds = InsertedFunds::none();
+
+            throw InsufficientChangeAvailableException::forAmount($changeDue);
+        }
+
+        $change = $this->cashReserve->withdraw($changeDue);
+
+        $this->cashReserve = $this->cashReserve->reducedBy($change);
+        $product->decreaseStock();
+        $this->insertedFunds = InsertedFunds::none();
+
+        return new VendedItem($selectorCode, $price, $change);
     }
 
     /**

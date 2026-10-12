@@ -1,0 +1,33 @@
+#!/bin/sh
+#
+# Optional pre-commit hook: run the Mago toolchain on the files staged for
+# commit, so a commit that would fail `composer quality` in CI is caught first.
+#
+# Enable it once per clone:
+#
+#     git config core.hooksPath hooks
+#
+# It uses a local `vendor/bin/mago` when one is available and otherwise falls
+# back to running Mago inside the app container. When neither is available the
+# check is skipped with a warning: CI still enforces it.
+
+set -eu
+
+if [ -x vendor/bin/mago ]; then
+    mago="vendor/bin/mago"
+elif docker compose ps --status running --services 2>/dev/null | grep -qx app; then
+    mago="docker compose exec -T app vendor/bin/mago"
+else
+    echo "pre-commit: Mago is not available locally and the app container is not running." >&2
+    echo "pre-commit: start it with 'docker compose up -d' (or install Mago) to run the checks." >&2
+    exit 0
+fi
+
+# $mago is intentionally unquoted: it is either a single binary or a command
+# with arguments.
+# shellcheck disable=SC2086
+$mago format --staged
+# shellcheck disable=SC2086
+$mago lint --staged
+# shellcheck disable=SC2086
+$mago analyze --staged

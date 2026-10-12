@@ -9,6 +9,4 @@ namespace App\VendingMachine\Application\ProvisionVendingMachine;
  * empty cash reserve and no inserted funds. Carries no payload — everything a new
  * machine starts with is defined by the aggregate.
  */
-final class ProvisionVendingMachine
-{
-}
+final class ProvisionVendingMachine {}

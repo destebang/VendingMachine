@@ -12,14 +12,13 @@ namespace App\VendingMachine\Domain\Model;
  * projection read the aggregate, so the aggregate itself can expose behaviour
  * rather than a getter per field.
  */
-final class VendingMachineState
+final readonly class VendingMachineState
 {
     public function __construct(
-        public readonly VendingMachineId $id,
-        public readonly Stock $stock,
-        public readonly CashReserve $cashReserve,
-        public readonly InsertedFunds $insertedFunds,
-        public readonly int $version,
-    ) {
-    }
+        public VendingMachineId $id,
+        public Stock $stock,
+        public CashReserve $cashReserve,
+        public InsertedFunds $insertedFunds,
+        public int $version,
+    ) {}
 }

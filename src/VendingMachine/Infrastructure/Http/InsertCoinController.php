@@ -33,7 +33,7 @@ final class InsertCoinController
     {
         try {
             /** @var array{denominationInCents?: int} $payload */
-            $payload = json_decode((string) $request->getContent(), true, flags: JSON_THROW_ON_ERROR);
+            $payload = json_decode($request->getContent(), associative: true, flags: JSON_THROW_ON_ERROR);
 
             $command = InsertCoin::fromInput($id, (int) ($payload['denominationInCents'] ?? 0));
         } catch (Throwable $exception) {

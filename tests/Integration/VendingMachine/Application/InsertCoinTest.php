@@ -67,8 +67,8 @@ final class InsertCoinTest extends TestCase
         try {
             ($this->insertCoin)(InsertCoin::fromInput($id, 50));
             self::fail('Expected the inserted coin to be rejected.');
-        } catch (InvalidDenominationException) {
-            // expected
+        } catch (InvalidDenominationException $exception) {
+            self::assertStringContainsString('not an allowed denomination', $exception->getMessage());
         }
 
         $stored = $this->repository->find(VendingMachineId::fromString($id));

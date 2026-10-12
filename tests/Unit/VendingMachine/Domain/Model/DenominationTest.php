@@ -43,9 +43,9 @@ final class DenominationTest extends TestCase
 
     public function test_two_denominations_of_the_same_amount_are_equal(): void
     {
-        self::assertTrue(
-            Denomination::fromCents(25, self::ALLOWED_COINS)
-                ->equals(Denomination::fromCents(25, self::ALLOWED_COINS)),
-        );
+        self::assertTrue(Denomination::fromCents(25, self::ALLOWED_COINS)->equals(Denomination::fromCents(
+            25,
+            self::ALLOWED_COINS,
+        )));
     }
 }

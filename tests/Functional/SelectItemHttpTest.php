@@ -10,6 +10,7 @@ use App\VendingMachine\Domain\Model\VendingMachineId;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Routing\RouteCollection;
 
 final class SelectItemHttpTest extends TestCase
 {
@@ -18,7 +19,8 @@ final class SelectItemHttpTest extends TestCase
     protected function setUp(): void
     {
         $container = ContainerFactory::create();
-        $routes = require dirname(__DIR__, 2) . '/config/routes.php';
+        /** @var RouteCollection $routes */
+        $routes = require dirname(__DIR__, levels: 2) . '/config/routes.php';
 
         $this->application = new HttpApplication($container, $routes);
     }
@@ -37,13 +39,16 @@ final class SelectItemHttpTest extends TestCase
         $response = $this->select($id, 'SODA');
 
         self::assertSame(Response::HTTP_OK, $response->getStatusCode());
-        self::assertSame([
-            'id' => $id,
-            'selectorCode' => 'SODA',
-            'priceInCents' => 150,
-            'change' => [],
-            'insertedFundsInCents' => 0,
-        ], $this->payload($response));
+        self::assertSame(
+            [
+                'id' => $id,
+                'selectorCode' => 'SODA',
+                'priceInCents' => 150,
+                'change' => [],
+                'insertedFundsInCents' => 0,
+            ],
+            $this->payload($response),
+        );
 
         $state = $this->state($id);
 
@@ -63,22 +68,28 @@ final class SelectItemHttpTest extends TestCase
         $response = $this->select($id, 'WATER');
 
         self::assertSame(Response::HTTP_OK, $response->getStatusCode());
-        self::assertSame([
-            'id' => $id,
-            'selectorCode' => 'WATER',
-            'priceInCents' => 65,
-            'change' => [25, 10],
-            'insertedFundsInCents' => 0,
-        ], $this->payload($response));
+        self::assertSame(
+            [
+                'id' => $id,
+                'selectorCode' => 'WATER',
+                'priceInCents' => 65,
+                'change' => [25, 10],
+                'insertedFundsInCents' => 0,
+            ],
+            $this->payload($response),
+        );
 
         $state = $this->state($id);
 
         self::assertSame(9, $state['stock'][0]['stock']);
-        self::assertSame([
-            ['denominationInCents' => 25, 'quantity' => 39],
-            ['denominationInCents' => 10, 'quantity' => 39],
-            ['denominationInCents' => 5, 'quantity' => 40],
-        ], $state['cashReserve']);
+        self::assertSame(
+            [
+                ['denominationInCents' => 25, 'quantity' => 39],
+                ['denominationInCents' => 10, 'quantity' => 39],
+                ['denominationInCents' => 5, 'quantity' => 40],
+            ],
+            $state['cashReserve'],
+        );
         self::assertSame(0, $state['insertedFundsInCents']);
     }
 
@@ -148,15 +159,19 @@ final class SelectItemHttpTest extends TestCase
     {
         $id = $this->provisionMachine();
 
-        $this->service($id, [
-            ['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10],
-            ['selectorCode' => 'JUICE', 'priceInCents' => 100, 'stock' => 10],
-            ['selectorCode' => 'SODA', 'priceInCents' => 150, 'stock' => 10],
-        ], [
-            ['denominationInCents' => 25, 'quantity' => 40],
-            ['denominationInCents' => 10, 'quantity' => 40],
-            ['denominationInCents' => 5, 'quantity' => 40],
-        ]);
+        $this->service(
+            $id,
+            [
+                ['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10],
+                ['selectorCode' => 'JUICE', 'priceInCents' => 100, 'stock' => 10],
+                ['selectorCode' => 'SODA', 'priceInCents' => 150, 'stock' => 10],
+            ],
+            [
+                ['denominationInCents' => 25, 'quantity' => 40],
+                ['denominationInCents' => 10, 'quantity' => 40],
+                ['denominationInCents' => 5, 'quantity' => 40],
+            ],
+        );
 
         return $id;
     }
@@ -209,7 +224,17 @@ final class SelectItemHttpTest extends TestCase
     }
 
     /**
-     * @return array<string, mixed>
+     * @return array{
+     *     id: string,
+     *     selectorCode: string,
+     *     priceInCents: int,
+     *     change: list<int>,
+     *     returnedCoins: list<int>,
+     *     insertedFundsInCents: int,
+     *     stock: list<array{selectorCode: string, priceInCents: int, stock: int}>,
+     *     cashReserve: list<array{denominationInCents: int, quantity: int}>,
+     *     error: string
+     * }
      */
     private function state(string $id): array
     {
@@ -217,10 +242,37 @@ final class SelectItemHttpTest extends TestCase
     }
 
     /**
-     * @return array<string, mixed>
+     * The union of every key the JSON API can return, so a test can read any of
+     * them without re-checking. A test never reads a key the response omits.
+     *
+     * @return array{
+     *     id: string,
+     *     selectorCode: string,
+     *     priceInCents: int,
+     *     change: list<int>,
+     *     returnedCoins: list<int>,
+     *     insertedFundsInCents: int,
+     *     stock: list<array{selectorCode: string, priceInCents: int, stock: int}>,
+     *     cashReserve: list<array{denominationInCents: int, quantity: int}>,
+     *     error: string
+     * }
      */
     private function payload(Response $response): array
     {
-        return json_decode((string) $response->getContent(), true, flags: JSON_THROW_ON_ERROR);
+        /** @var array{
+         *     id: string,
+         *     selectorCode: string,
+         *     priceInCents: int,
+         *     change: list<int>,
+         *     returnedCoins: list<int>,
+         *     insertedFundsInCents: int,
+         *     stock: list<array{selectorCode: string, priceInCents: int, stock: int}>,
+         *     cashReserve: list<array{denominationInCents: int, quantity: int}>,
+         *     error: string
+         * } $payload */
+        $payload = json_decode((string) $response->getContent(), associative: true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($payload);
+
+        return $payload;
     }
 }

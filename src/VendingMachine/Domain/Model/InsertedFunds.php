@@ -14,16 +14,15 @@ namespace App\VendingMachine\Domain\Model;
  * from the coins, and a non-empty collection is exactly what makes a
  * transaction pending.
  */
-final class InsertedFunds
+final readonly class InsertedFunds
 {
     /**
      * @param list<int> $denominationsInCents the literal coins inserted, in the
      *                                       order they were inserted
      */
     private function __construct(
-        private readonly array $denominationsInCents,
-    ) {
-    }
+        private array $denominationsInCents,
+    ) {}
 
     public static function none(): self
     {

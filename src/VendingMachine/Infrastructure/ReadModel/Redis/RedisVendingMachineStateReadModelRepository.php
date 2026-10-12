@@ -15,8 +15,7 @@ final class RedisVendingMachineStateReadModelRepository implements VendingMachin
 {
     public function __construct(
         private readonly ClientInterface $redis,
-    ) {
-    }
+    ) {}
 
     public function put(string $vendingMachineId, array $state): void
     {
@@ -32,7 +31,7 @@ final class RedisVendingMachineStateReadModelRepository implements VendingMachin
         }
 
         /** @var array<string, mixed> $decoded */
-        $decoded = json_decode($raw, true, flags: JSON_THROW_ON_ERROR);
+        $decoded = json_decode($raw, associative: true, flags: JSON_THROW_ON_ERROR);
 
         return $decoded;
     }

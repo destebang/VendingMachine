@@ -24,7 +24,10 @@ use Throwable;
  * machine and prints the resulting state, whose `insertedFundsInCents` is the
  * updated balance.
  */
-#[AsCommand(name: 'app:vending-machine:insert-coin', description: 'Inserts a coin into a machine and prints its state.')]
+#[AsCommand(
+    name: 'app:vending-machine:insert-coin',
+    description: 'Inserts a coin into a machine and prints its state.',
+)]
 final class InsertCoinCommand extends Command
 {
     use HandleTrait;

@@ -177,6 +177,48 @@ docker compose exec -e MONGO_DB=vending_test -e REDIS_URL=redis://redis:6379/1 \
 CI runs all three suites automatically on every push and pull request (see
 `.github/workflows/tests.yml`).
 
+## Code quality
+
+Formatting, linting, static analysis and architectural guards are handled by
+[Mago](https://mago.carthage.software/), configured in [`mago.toml`](./mago.toml).
+The guard enforces the hexagonal layering (Domain ← Application ←
+Infrastructure), keeps Symfony, Doctrine, MongoDB and Predis out of the inner
+layers, and pins naming and modifier conventions on controllers, commands,
+repositories, domain models and domain exceptions.
+
+Run the four checks through Composer (or `vendor/bin/mago <tool>` directly):
+
+```bash
+composer fmt:check   # mago format --check
+composer lint        # mago lint
+composer analyse     # mago analyze
+composer guard       # mago guard
+
+# or all four at once:
+composer quality
+```
+
+`composer fmt` rewrites files, and `composer fix` runs the full
+guard → analyze → lint → format loop until it converges.
+
+Both workflows run on every push and pull request: `.github/workflows/tests.yml`
+runs the three test suites, and `.github/workflows/quality.yml` runs the four
+checks above.
+
+### Optional pre-commit hook
+
+A pre-commit hook that runs `mago format --staged`, `mago lint --staged` and
+`mago analyze --staged` is committed under [`hooks/`](./hooks). Enable it once
+per clone:
+
+```bash
+git config core.hooksPath hooks
+```
+
+It uses a local `vendor/bin/mago` when available and otherwise runs Mago inside
+the app container; when neither is available it skips with a warning, since CI
+enforces the checks regardless.
+
 ## Domain language
 
 The vocabulary this codebase speaks — stock, cash reserve, inserted funds,
@@ -301,3 +343,8 @@ balance.
   projection always reflects the balance after the attempt. That costs a
   no-op write on `InsufficientFunds` and `OutOfStock`, where the machine's state
   does not actually change.
+* Two Mago rules are tuned in `mago.toml`: `too-many-methods` is raised and
+  skips tests (test classes grow one method per case), and
+  `inline-variable-return` is off because its fixer strips the `@var` that
+  narrows a `mixed` value decoded from JSON. Both are configuration, not
+  baselines — there are no baseline files.

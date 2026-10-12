@@ -66,11 +66,13 @@ final class ProvisionAndServiceTest extends TestCase
     {
         $id = ($this->provision)(new ProvisionVendingMachine())->id();
 
-        ($this->service)(new ServiceVendingMachine(
-            VendingMachineId::fromString($id),
-            Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
-            CashReserve::fromCounts([100 => 5, 50 => 3]),
-        ));
+        ($this->service)(
+            new ServiceVendingMachine(
+                VendingMachineId::fromString($id),
+                Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
+                CashReserve::fromCounts([100 => 5, 50 => 3]),
+            ),
+        );
 
         $stored = $this->repository->find(VendingMachineId::fromString($id));
 
@@ -78,35 +80,42 @@ final class ProvisionAndServiceTest extends TestCase
         self::assertSame(10, $stored->state()->stock->quantityOf('WATER'));
         self::assertSame([100 => 5, 50 => 3], $stored->state()->cashReserve->counts());
 
-        self::assertSame([
-            'id' => $id,
-            'stock' => [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10]],
-            'cashReserve' => [
-                ['denominationInCents' => 100, 'quantity' => 5],
-                ['denominationInCents' => 50, 'quantity' => 3],
+        self::assertSame(
+            [
+                'id' => $id,
+                'stock' => [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10]],
+                'cashReserve' => [
+                    ['denominationInCents' => 100, 'quantity' => 5],
+                    ['denominationInCents' => 50, 'quantity' => 3],
+                ],
+                'insertedFundsInCents' => 0,
             ],
-            'insertedFundsInCents' => 0,
-        ], $this->readModel->get($id));
+            $this->readModel->get($id),
+        );
     }
 
     public function test_service_replaces_the_previous_state(): void
     {
         $id = ($this->provision)(new ProvisionVendingMachine())->id();
 
-        ($this->service)(new ServiceVendingMachine(
-            VendingMachineId::fromString($id),
-            Stock::fromProducts([
-                Product::create('WATER', Money::fromCents(65), 10),
-                Product::create('CHIPS', Money::fromCents(120), 4),
-            ]),
-            CashReserve::fromCounts([100 => 5]),
-        ));
+        ($this->service)(
+            new ServiceVendingMachine(
+                VendingMachineId::fromString($id),
+                Stock::fromProducts([
+                    Product::create('WATER', Money::fromCents(65), 10),
+                    Product::create('CHIPS', Money::fromCents(120), 4),
+                ]),
+                CashReserve::fromCounts([100 => 5]),
+            ),
+        );
 
-        ($this->service)(new ServiceVendingMachine(
-            VendingMachineId::fromString($id),
-            Stock::fromProducts([Product::create('CHIPS', Money::fromCents(150), 1)]),
-            CashReserve::fromCounts([50 => 2]),
-        ));
+        ($this->service)(
+            new ServiceVendingMachine(
+                VendingMachineId::fromString($id),
+                Stock::fromProducts([Product::create('CHIPS', Money::fromCents(150), 1)]),
+                CashReserve::fromCounts([50 => 2]),
+            ),
+        );
 
         $stored = $this->repository->find(VendingMachineId::fromString($id));
 
@@ -118,10 +127,8 @@ final class ProvisionAndServiceTest extends TestCase
 
         $projected = $this->readModel->get($id);
 
-        self::assertSame(
-            [['selectorCode' => 'CHIPS', 'priceInCents' => 150, 'stock' => 1]],
-            $projected['stock'],
-        );
+        self::assertNotNull($projected);
+        self::assertSame([['selectorCode' => 'CHIPS', 'priceInCents' => 150, 'stock' => 1]], $projected['stock']);
         self::assertSame([['denominationInCents' => 50, 'quantity' => 2]], $projected['cashReserve']);
     }
 
@@ -135,14 +142,16 @@ final class ProvisionAndServiceTest extends TestCase
         $this->readModel->put($id->toString(), MachineStateView::fromAggregate($machine)->toArray());
 
         try {
-            ($this->service)(new ServiceVendingMachine(
-                $id,
-                Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
-                CashReserve::fromCounts([100 => 5]),
-            ));
+            ($this->service)(
+                new ServiceVendingMachine(
+                    $id,
+                    Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
+                    CashReserve::fromCounts([100 => 5]),
+                ),
+            );
             self::fail('Expected the service action to be rejected while a transaction is pending.');
-        } catch (PendingTransactionInProgressException) {
-            // expected
+        } catch (PendingTransactionInProgressException $exception) {
+            self::assertStringContainsString('transaction is in progress', $exception->getMessage());
         }
 
         $stored = $this->repository->find($id);

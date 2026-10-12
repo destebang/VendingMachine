@@ -24,8 +24,7 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
 {
     public function __construct(
         private readonly DocumentManager $documentManager,
-    ) {
-    }
+    ) {}
 
     public function find(VendingMachineId $id): ?VendingMachine
     {
@@ -74,14 +73,11 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
      */
     private static function stockToDocument(array $stock): array
     {
-        return array_values(array_map(
-            static fn (Product $product): array => [
-                'selectorCode' => $product->selectorCode(),
-                'priceInCents' => $product->price()->amountInCents(),
-                'stock' => $product->stock(),
-            ],
-            $stock,
-        ));
+        return array_values(array_map(static fn(Product $product): array => [
+            'selectorCode' => $product->selectorCode(),
+            'priceInCents' => $product->price()->amountInCents(),
+            'stock' => $product->stock(),
+        ], $stock));
     }
 
     /**
@@ -93,11 +89,7 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
     {
         $products = [];
         foreach ($stock as $row) {
-            $products[] = Product::create(
-                $row['selectorCode'],
-                Money::fromCents($row['priceInCents']),
-                $row['stock'],
-            );
+            $products[] = Product::create($row['selectorCode'], Money::fromCents($row['priceInCents']), $row['stock']);
         }
 
         return $products;

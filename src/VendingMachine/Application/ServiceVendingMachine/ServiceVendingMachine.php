@@ -20,8 +20,7 @@ final class ServiceVendingMachine
         public readonly VendingMachineId $vendingMachineId,
         public readonly Stock $stock,
         public readonly CashReserve $cashReserve,
-    ) {
-    }
+    ) {}
 
     /**
      * Builds the command from already-decoded transport input (HTTP JSON body,
@@ -35,11 +34,7 @@ final class ServiceVendingMachine
     {
         $products = [];
         foreach ($stock as $row) {
-            $products[] = Product::create(
-                $row['selectorCode'],
-                Money::fromCents($row['priceInCents']),
-                $row['stock'],
-            );
+            $products[] = Product::create($row['selectorCode'], Money::fromCents($row['priceInCents']), $row['stock']);
         }
 
         $counts = [];

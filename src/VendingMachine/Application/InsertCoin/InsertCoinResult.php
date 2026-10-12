@@ -14,6 +14,5 @@ final class InsertCoinResult
 {
     public function __construct(
         public readonly MachineStateView $state,
-    ) {
-    }
+    ) {}
 }

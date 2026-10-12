@@ -1,0 +1,33 @@
+name: quality
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+
+    env:
+      # Passed through to the container so Mago's first binary download is
+      # authenticated (and to let Mago emit GitHub annotations).
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build the app image
+        run: docker compose build app
+
+      - name: Check formatting
+        run: docker compose run --rm --no-deps -e GITHUB_TOKEN app vendor/bin/mago format --check
+
+      - name: Lint
+        run: docker compose run --rm --no-deps -e GITHUB_TOKEN app vendor/bin/mago lint
+
+      - name: Analyse
+        run: docker compose run --rm --no-deps -e GITHUB_TOKEN app vendor/bin/mago analyze
+
+      - name: Guard
+        run: docker compose run --rm --no-deps -e GITHUB_TOKEN app vendor/bin/mago guard

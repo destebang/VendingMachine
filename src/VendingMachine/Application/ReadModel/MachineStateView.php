@@ -26,21 +26,17 @@ final class MachineStateView
         public readonly array $stock,
         public readonly array $cashReserve,
         public readonly int $insertedFundsInCents,
-    ) {
-    }
+    ) {}
 
     public static function fromAggregate(VendingMachine $vendingMachine): self
     {
         $state = $vendingMachine->state();
 
-        $stock = array_map(
-            static fn (Product $product): array => [
-                'selectorCode' => $product->selectorCode(),
-                'priceInCents' => $product->price()->amountInCents(),
-                'stock' => $product->stock(),
-            ],
-            array_values($state->stock->products()),
-        );
+        $stock = array_map(static fn(Product $product): array => [
+            'selectorCode' => $product->selectorCode(),
+            'priceInCents' => $product->price()->amountInCents(),
+            'stock' => $product->stock(),
+        ], array_values($state->stock->products()));
 
         $cashReserve = [];
         foreach ($state->cashReserve->counts() as $denominationInCents => $quantity) {

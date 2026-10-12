@@ -21,8 +21,9 @@ final class DocumentManagerFactory
         $cacheDir = sys_get_temp_dir() . '/vending-machine/doctrine-odm';
 
         $configuration = new Configuration();
-        $configuration->setProxyDir($cacheDir . '/proxies');
-        $configuration->setProxyNamespace('App\\Infrastructure\\Doctrine\\Proxies');
+        // Native lazy objects (PHP 8.4+) replace generated proxy classes, so the
+        // proxy directory/namespace settings are no longer needed.
+        $configuration->setUseNativeLazyObject(true);
         $configuration->setHydratorDir($cacheDir . '/hydrators');
         $configuration->setHydratorNamespace('App\\Infrastructure\\Doctrine\\Hydrators');
         $configuration->setDefaultDB($_ENV['MONGO_DB'] ?? 'vending');

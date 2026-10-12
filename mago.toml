@@ -1,0 +1,132 @@
+#:schema vendor/carthage-software/mago/schema.json
+
+# Mago toolchain: formatting, linting, static analysis and architectural
+# guards. Configuration reference: https://mago.carthage.software/
+
+version = "1"
+php-version = "8.4"
+
+[source]
+paths = ["src", "tests"]
+includes = ["vendor"]
+excludes = ["var/**"]
+
+[source.glob]
+literal-separator = true
+
+[linter.rules]
+# Test classes grow one method per case; that count is not a smell there. The
+# threshold is lifted a little to leave room for rich domain value objects.
+too-many-methods = { exclude = ["tests/"], threshold = 15 }
+# Its fixer inlines `$x = ...; return $x;`, which strips the `@var` that narrows
+# a `mixed` value and re-opens analyzer errors. Keep the explicit assignment.
+inline-variable-return = { enabled = false }
+
+# --- Architectural guard ----------------------------------------------------
+#
+# The application is a hexagonal/ports-and-adapters layout: Domain and
+# Application depend only on interfaces, Infrastructure provides the adapters,
+# and the Kernel wires everything together.
+
+[guard.perimeter]
+layering = [
+    "App\\VendingMachine\\Domain",
+    "App\\VendingMachine\\Application",
+    "App\\VendingMachine\\Infrastructure",
+]
+layering-reason = "Outer layers may depend on inner layers, never the reverse."
+
+[[guard.perimeter.rules]]
+namespace = "App\\VendingMachine\\Domain\\"
+permit = ["@self", "@native"]
+reason = "The Domain layer may only use itself and PHP built-ins."
+
+[[guard.perimeter.rules]]
+namespace = "App\\VendingMachine\\Application\\"
+permit = ["@self", "@native"]
+reason = "The Application layer may only use itself, the Domain and PHP built-ins."
+
+[[guard.perimeter.rules]]
+namespace = "App\\VendingMachine\\Infrastructure\\"
+permit = [
+    "@self",
+    "@native",
+    "Symfony\\**",
+    "Doctrine\\**",
+    "MongoDB\\**",
+    "Predis\\**",
+    "Psr\\**",
+]
+reason = "Infrastructure adapters may use framework and driver libraries."
+
+[[guard.perimeter.rules]]
+namespace = "App\\Kernel\\"
+permit = ["@all"]
+reason = "The Kernel is the composition root and wires every layer together."
+
+[[guard.perimeter.rules]]
+namespace = "App\\Tests\\"
+permit = ["@all"]
+reason = "Tests may reach into any layer."
+
+[[guard.perimeter.restrictions]]
+dependency = "Symfony\\**"
+deny-from = ["App\\VendingMachine\\Domain\\", "App\\VendingMachine\\Application\\"]
+reason = "Symfony must not leak into the Domain or Application layers."
+
+[[guard.perimeter.restrictions]]
+dependency = "Doctrine\\**"
+deny-from = ["App\\VendingMachine\\Domain\\", "App\\VendingMachine\\Application\\"]
+reason = "Doctrine must not leak into the Domain or Application layers."
+
+[[guard.perimeter.restrictions]]
+dependency = "Predis\\**"
+deny-from = ["App\\VendingMachine\\Domain\\", "App\\VendingMachine\\Application\\"]
+reason = "Predis must not leak into the Domain or Application layers."
+
+[[guard.perimeter.restrictions]]
+dependency = "MongoDB\\**"
+deny-from = ["App\\VendingMachine\\Domain\\", "App\\VendingMachine\\Application\\"]
+reason = "MongoDB must not leak into the Domain or Application layers."
+
+# --- Structural conventions -------------------------------------------------
+
+[[guard.structural.rules]]
+on = "App\\VendingMachine\\Infrastructure\\Http\\**"
+target = "class"
+must-be-final = true
+must-be-named = "*Controller"
+reason = "HTTP controllers must be final and named *Controller."
+
+[[guard.structural.rules]]
+on = "App\\VendingMachine\\Infrastructure\\Console\\**"
+target = "class"
+must-be-final = true
+must-be-named = "*Command"
+reason = "Console commands must be final and named *Command."
+
+[[guard.structural.rules]]
+on = "App\\VendingMachine\\Domain\\Repository\\**"
+target = "interface"
+must-be-named = "*Repository"
+reason = "Domain repository interfaces must be named *Repository."
+
+[[guard.structural.rules]]
+on = "App\\VendingMachine\\Domain\\Model\\**"
+target = "class"
+must-be-final = true
+reason = "Domain model classes must be final."
+
+[[guard.structural.rules]]
+on = "App\\VendingMachine\\Domain\\Model\\**"
+not-on = "App\\VendingMachine\\Domain\\Model\\{Product,VendingMachine}"
+target = "class"
+must-be-readonly = true
+reason = "Domain value objects must be immutable (readonly); the aggregate and its entity stay mutable."
+
+[[guard.structural.rules]]
+on = "App\\VendingMachine\\Domain\\Exception\\**"
+target = "class"
+must-be-final = true
+must-be-named = "*Exception"
+reason = "Domain exceptions must be final and named *Exception."

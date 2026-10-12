@@ -20,8 +20,7 @@ final class Product
         private readonly string $selectorCode,
         private readonly Money $price,
         private int $stock,
-    ) {
-    }
+    ) {}
 
     public static function create(string $selectorCode, Money $price, int $stock): self
     {

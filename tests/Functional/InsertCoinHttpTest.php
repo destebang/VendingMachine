@@ -10,6 +10,7 @@ use App\VendingMachine\Domain\Model\VendingMachineId;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Routing\RouteCollection;
 
 final class InsertCoinHttpTest extends TestCase
 {
@@ -18,7 +19,8 @@ final class InsertCoinHttpTest extends TestCase
     protected function setUp(): void
     {
         $container = ContainerFactory::create();
-        $routes = require dirname(__DIR__, 2) . '/config/routes.php';
+        /** @var RouteCollection $routes */
+        $routes = require dirname(__DIR__, levels: 2) . '/config/routes.php';
 
         $this->application = new HttpApplication($container, $routes);
     }
@@ -36,7 +38,7 @@ final class InsertCoinHttpTest extends TestCase
         self::assertSame(Response::HTTP_OK, $state->getStatusCode());
         self::assertSame(
             ['id' => $id, 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 150],
-            json_decode((string) $state->getContent(), true, flags: JSON_THROW_ON_ERROR),
+            json_decode((string) $state->getContent(), associative: true, flags: JSON_THROW_ON_ERROR),
         );
     }
 
@@ -48,23 +50,18 @@ final class InsertCoinHttpTest extends TestCase
 
         self::assertSame(Response::HTTP_BAD_REQUEST, $response->getStatusCode());
 
-        $payload = json_decode((string) $response->getContent(), true, flags: JSON_THROW_ON_ERROR);
+        $payload = $this->payload($response);
 
         self::assertSame('InvalidDenomination', $payload['error']);
 
         $state = $this->application->handle(Request::create('/vending-machines/' . $id, 'GET'));
 
-        self::assertSame(
-            0,
-            json_decode((string) $state->getContent(), true, flags: JSON_THROW_ON_ERROR)['insertedFundsInCents'],
-        );
+        self::assertSame(0, $this->payload($state)['insertedFundsInCents']);
     }
 
     public function test_inserting_into_an_unknown_machine_returns_not_found(): void
     {
-        $response = $this->application->handle(
-            $this->coinRequest(VendingMachineId::generate()->toString(), 25),
-        );
+        $response = $this->application->handle($this->coinRequest(VendingMachineId::generate()->toString(), 25));
 
         self::assertSame(Response::HTTP_NOT_FOUND, $response->getStatusCode());
     }
@@ -73,7 +70,7 @@ final class InsertCoinHttpTest extends TestCase
     {
         $response = $this->application->handle(Request::create('/vending-machines', 'POST'));
 
-        return json_decode((string) $response->getContent(), true, flags: JSON_THROW_ON_ERROR)['id'];
+        return $this->payload($response)['id'];
     }
 
     private function insertCoin(string $id, int $denominationInCents): int
@@ -82,7 +79,42 @@ final class InsertCoinHttpTest extends TestCase
 
         self::assertSame(Response::HTTP_OK, $response->getStatusCode());
 
-        return json_decode((string) $response->getContent(), true, flags: JSON_THROW_ON_ERROR)['insertedFundsInCents'];
+        return $this->payload($response)['insertedFundsInCents'];
+    }
+
+    /**
+     * The union of every key the JSON API can return, so a test can read any of
+     * them without re-checking. A test never reads a key the response omits.
+     *
+     * @return array{
+     *     id: string,
+     *     selectorCode: string,
+     *     priceInCents: int,
+     *     change: list<int>,
+     *     returnedCoins: list<int>,
+     *     insertedFundsInCents: int,
+     *     stock: list<array{selectorCode: string, priceInCents: int, stock: int}>,
+     *     cashReserve: list<array{denominationInCents: int, quantity: int}>,
+     *     error: string
+     * }
+     */
+    private function payload(Response $response): array
+    {
+        /** @var array{
+         *     id: string,
+         *     selectorCode: string,
+         *     priceInCents: int,
+         *     change: list<int>,
+         *     returnedCoins: list<int>,
+         *     insertedFundsInCents: int,
+         *     stock: list<array{selectorCode: string, priceInCents: int, stock: int}>,
+         *     cashReserve: list<array{denominationInCents: int, quantity: int}>,
+         *     error: string
+         * } $payload */
+        $payload = json_decode((string) $response->getContent(), associative: true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($payload);
+
+        return $payload;
     }
 
     private function coinRequest(string $id, int $denominationInCents): Request

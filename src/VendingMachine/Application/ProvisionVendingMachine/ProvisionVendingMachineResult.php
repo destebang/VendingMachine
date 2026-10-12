@@ -14,8 +14,7 @@ final class ProvisionVendingMachineResult
 {
     public function __construct(
         private readonly VendingMachineId $vendingMachineId,
-    ) {
-    }
+    ) {}
 
     public function id(): string
     {

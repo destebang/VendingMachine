@@ -33,7 +33,7 @@ final class ServiceVendingMachineController
     {
         try {
             /** @var array{stock?: list<array{selectorCode: string, priceInCents: int, stock: int}>, cashReserve?: list<array{denominationInCents: int, quantity: int}>} $payload */
-            $payload = json_decode((string) $request->getContent(), true, flags: JSON_THROW_ON_ERROR);
+            $payload = json_decode($request->getContent(), associative: true, flags: JSON_THROW_ON_ERROR);
 
             $command = ServiceVendingMachine::fromInput($id, $payload['stock'] ?? [], $payload['cashReserve'] ?? []);
         } catch (Throwable $exception) {

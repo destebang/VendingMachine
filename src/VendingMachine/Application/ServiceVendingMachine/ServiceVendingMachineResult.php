@@ -14,6 +14,5 @@ final class ServiceVendingMachineResult
 {
     public function __construct(
         public readonly MachineStateView $state,
-    ) {
-    }
+    ) {}
 }

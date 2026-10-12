@@ -12,15 +12,14 @@ namespace App\VendingMachine\Domain\Model;
  * coins: the machine has to say which denominations it gave back, not only how
  * much they add up to.
  */
-final class ChangeDue
+final readonly class ChangeDue
 {
     /**
      * @param array<int, int> $counts denomination in cents => number of units
      */
     private function __construct(
-        private readonly array $counts,
-    ) {
-    }
+        private array $counts,
+    ) {}
 
     public static function none(): self
     {
@@ -40,6 +39,9 @@ final class ChangeDue
 
             $normalized[$denominationInCents] = $quantity;
         }
+
+        // Normalise the key order so value equality is order-insensitive.
+        ksort($normalized);
 
         return new self($normalized);
     }
@@ -92,6 +94,6 @@ final class ChangeDue
 
     public function equals(self $other): bool
     {
-        return $this->counts == $other->counts;
+        return $this->counts === $other->counts;
     }
 }

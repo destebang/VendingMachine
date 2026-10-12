@@ -18,7 +18,7 @@ final class ContainerFactory
 {
     public static function create(): ContainerBuilder
     {
-        $projectDir = dirname(__DIR__, 2);
+        $projectDir = dirname(__DIR__, levels: 2);
 
         $container = new ContainerBuilder();
         $loader = new YamlFileLoader($container, new FileLocator($projectDir . '/config'));

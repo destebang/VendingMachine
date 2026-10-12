@@ -11,12 +11,11 @@ namespace App\VendingMachine\Domain\Model;
  * Returned by `VendingMachine::selectItem()` so the application layer can report
  * both without reading the aggregate's fields.
  */
-final class VendedItem
+final readonly class VendedItem
 {
     public function __construct(
-        public readonly string $selectorCode,
-        public readonly Money $price,
-        public readonly ChangeDue $changeDue,
-    ) {
-    }
+        public string $selectorCode,
+        public Money $price,
+        public ChangeDue $changeDue,
+    ) {}
 }

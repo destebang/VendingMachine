@@ -9,8 +9,7 @@ final class HealthCheckResult
     public function __construct(
         public readonly bool $mongoOk,
         public readonly bool $redisOk,
-    ) {
-    }
+    ) {}
 
     public function isHealthy(): bool
     {

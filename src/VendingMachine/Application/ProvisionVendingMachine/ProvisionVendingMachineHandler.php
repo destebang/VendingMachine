@@ -20,8 +20,7 @@ final class ProvisionVendingMachineHandler
     public function __construct(
         private readonly VendingMachineRepository $vendingMachineRepository,
         private readonly VendingMachineStateReadModelRepository $readModel,
-    ) {
-    }
+    ) {}
 
     public function __invoke(ProvisionVendingMachine $command): ProvisionVendingMachineResult
     {
@@ -29,10 +28,7 @@ final class ProvisionVendingMachineHandler
         $state = $vendingMachine->state();
 
         $this->vendingMachineRepository->save($vendingMachine);
-        $this->readModel->put(
-            $state->id->toString(),
-            MachineStateView::fromAggregate($vendingMachine)->toArray(),
-        );
+        $this->readModel->put($state->id->toString(), MachineStateView::fromAggregate($vendingMachine)->toArray());
 
         return new ProvisionVendingMachineResult($state->id);
     }

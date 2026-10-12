@@ -10,6 +10,7 @@ use App\VendingMachine\Domain\Model\VendingMachineId;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Routing\RouteCollection;
 
 final class ReturnCoinHttpTest extends TestCase
 {
@@ -18,7 +19,8 @@ final class ReturnCoinHttpTest extends TestCase
     protected function setUp(): void
     {
         $container = ContainerFactory::create();
-        $routes = require dirname(__DIR__, 2) . '/config/routes.php';
+        /** @var RouteCollection $routes */
+        $routes = require dirname(__DIR__, levels: 2) . '/config/routes.php';
 
         $this->application = new HttpApplication($container, $routes);
     }
@@ -36,11 +38,14 @@ final class ReturnCoinHttpTest extends TestCase
         $response = $this->returnCoin($id);
 
         self::assertSame(Response::HTTP_OK, $response->getStatusCode());
-        self::assertSame([
-            'id' => $id,
-            'returnedCoins' => [10, 10],
-            'insertedFundsInCents' => 0,
-        ], $this->payload($response));
+        self::assertSame(
+            [
+                'id' => $id,
+                'returnedCoins' => [10, 10],
+                'insertedFundsInCents' => 0,
+            ],
+            $this->payload($response),
+        );
 
         self::assertSame(0, $this->state($id)['insertedFundsInCents']);
     }
@@ -52,11 +57,14 @@ final class ReturnCoinHttpTest extends TestCase
         $response = $this->returnCoin($id);
 
         self::assertSame(Response::HTTP_OK, $response->getStatusCode());
-        self::assertSame([
-            'id' => $id,
-            'returnedCoins' => [],
-            'insertedFundsInCents' => 0,
-        ], $this->payload($response));
+        self::assertSame(
+            [
+                'id' => $id,
+                'returnedCoins' => [],
+                'insertedFundsInCents' => 0,
+            ],
+            $this->payload($response),
+        );
     }
 
     public function test_returning_on_an_unknown_machine_returns_not_found(): void
@@ -95,7 +103,17 @@ final class ReturnCoinHttpTest extends TestCase
     }
 
     /**
-     * @return array<string, mixed>
+     * @return array{
+     *     id: string,
+     *     selectorCode: string,
+     *     priceInCents: int,
+     *     change: list<int>,
+     *     returnedCoins: list<int>,
+     *     insertedFundsInCents: int,
+     *     stock: list<array{selectorCode: string, priceInCents: int, stock: int}>,
+     *     cashReserve: list<array{denominationInCents: int, quantity: int}>,
+     *     error: string
+     * }
      */
     private function state(string $id): array
     {
@@ -103,10 +121,37 @@ final class ReturnCoinHttpTest extends TestCase
     }
 
     /**
-     * @return array<string, mixed>
+     * The union of every key the JSON API can return, so a test can read any of
+     * them without re-checking. A test never reads a key the response omits.
+     *
+     * @return array{
+     *     id: string,
+     *     selectorCode: string,
+     *     priceInCents: int,
+     *     change: list<int>,
+     *     returnedCoins: list<int>,
+     *     insertedFundsInCents: int,
+     *     stock: list<array{selectorCode: string, priceInCents: int, stock: int}>,
+     *     cashReserve: list<array{denominationInCents: int, quantity: int}>,
+     *     error: string
+     * }
      */
     private function payload(Response $response): array
     {
-        return json_decode((string) $response->getContent(), true, flags: JSON_THROW_ON_ERROR);
+        /** @var array{
+         *     id: string,
+         *     selectorCode: string,
+         *     priceInCents: int,
+         *     change: list<int>,
+         *     returnedCoins: list<int>,
+         *     insertedFundsInCents: int,
+         *     stock: list<array{selectorCode: string, priceInCents: int, stock: int}>,
+         *     cashReserve: list<array{denominationInCents: int, quantity: int}>,
+         *     error: string
+         * } $payload */
+        $payload = json_decode((string) $response->getContent(), associative: true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($payload);
+
+        return $payload;
     }
 }

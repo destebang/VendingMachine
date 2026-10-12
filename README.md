@@ -4,11 +4,13 @@ A vending machine, built on standalone Symfony components (no
 `framework-bundle`), with a MongoDB-backed write model (Doctrine ODM) and a
 Redis-backed read model.
 
-**Current state: bootstrap skeleton.** This proves the whole stack boots
-end-to-end — HTTP, CLI, MongoDB, Redis, dependency injection, a Messenger
-command bus, and a three-layer test suite — before any vending machine
-business logic is built on top of it. There are no use cases yet beyond a
-health check that round-trips data through both stores.
+**Current state: first feature slice.** The whole stack boots end-to-end —
+HTTP, CLI, MongoDB, Redis, dependency injection, a Messenger command bus, and
+a three-layer test suite — and carries its first real use cases: provision a
+vending machine, service it (declare its true item stock and coin reserve), and
+read its current state back. The write side lives in MongoDB (Doctrine ODM),
+the read side in Redis, and the two are kept in step by the command handlers.
+A health check still round-trips data through both stores.
 
 ## Requirements
 
@@ -41,6 +43,47 @@ docker compose exec app php bin/console app:health-check
 # -> {"mongo":true,"redis":true,"healthy":true}
 ```
 
+## Using it
+
+Provision a machine (empty stock, empty cash reserve, no inserted funds) and
+note its id:
+
+```bash
+curl -s -X POST http://localhost:8000/vending-machines
+# -> {"id":"01a12f94-62ac-771b-a72a-f8a35ea379bb"}
+```
+
+Service it: declare its **true** item stock and coin reserve. These replace the
+previous state, they are not added to it — and the action is rejected with a
+`PendingTransactionInProgress` (HTTP 409) while a customer transaction is in
+flight.
+
+```bash
+curl -s -X POST http://localhost:8000/vending-machines/$ID/service \
+  -H 'Content-Type: application/json' \
+  -d '{"stock":[{"selectorCode":"WATER","priceInCents":65,"stock":10}],
+       "cashReserve":[{"denominationInCents":100,"quantity":5}]}'
+```
+
+Read the current state back from the Redis read model:
+
+```bash
+curl -s http://localhost:8000/vending-machines/$ID
+# -> {"id":"...","stock":[{"selectorCode":"WATER","priceInCents":65,"stock":10}],
+#     "cashReserve":[{"denominationInCents":100,"quantity":5}],"insertedFundsInCents":0}
+```
+
+The same three use cases are available through the CLI, dispatching the exact
+same commands through the same bus:
+
+```bash
+docker compose exec app php bin/console app:vending-machine:provision
+docker compose exec app php bin/console app:vending-machine:service $ID \
+  --stock='[{"selectorCode":"WATER","priceInCents":65,"stock":10}]' \
+  --cash-reserve='[{"denominationInCents":100,"quantity":5}]'
+docker compose exec app php bin/console app:vending-machine:show $ID
+```
+
 ## Running the tests
 
 ```bash
@@ -59,15 +102,24 @@ docker compose exec -e MONGO_DB=vending_test -e REDIS_URL=redis://redis:6379/1 \
 
 * **Unit** (`tests/Unit`) — domain value objects and entities
   (`Money`, `Denomination`, `Product`, `VendingMachine`), exercised in
-  isolation with no I/O.
-* **Integration** (`tests/Integration`) — the MongoDB repository and the
-  Redis read-model repository against real instances.
-* **Functional** (`tests/Functional`) — boots the real HTTP application and
-  the real CLI command and exercises the health check through the full
-  request/response (and input/output) cycle, Messenger bus included.
+  isolation with no I/O, including the service replace semantics and the
+  mid-transaction rejection.
+* **Integration** (`tests/Integration`) — the MongoDB repository, the Redis
+  read-model repository and the provision/service use cases against real
+  instances.
+* **Functional** (`tests/Functional`) — boots the real HTTP application and the
+  real CLI commands and exercises provisioning, servicing and reading state
+  (plus the mid-transaction rejection) through the full request/response (and
+  input/output) cycle, Messenger bus included.
 
 CI runs all three suites automatically on every push and pull request (see
 `.github/workflows/tests.yml`).
+
+## Domain language
+
+The vocabulary this codebase speaks — stock, cash reserve, inserted funds,
+pending transaction, service — is defined in [`CONTEXT.md`](./CONTEXT.md).
+Prefer those terms in code, comments and commits.
 
 ## Architecture
 
@@ -84,15 +136,17 @@ src/
     │   └── Exception/
     ├── Application/            # Use cases: orchestrates the domain,
     │   │                        # talks only to ports.
-    │   ├── HealthCheck/         # Command + handler + result (today's only
-    │   │                        # use case: a stack smoke test)
-    │   └── ReadModel/           # Read-model port
+    │   ├── HealthCheck/         # Stack smoke test (command + handler + result)
+    │   ├── ProvisionVendingMachine/  # Create a machine, seed the projection
+    │   ├── ServiceVendingMachine/    # Service action: replace stock + cash reserve
+    │   ├── GetVendingMachineState/   # Read-side query over the Redis projection
+    │   └── ReadModel/           # Read-model port + MachineStateView
     └── Infrastructure/         # Adapters: the only place that knows about
         │                        # Mongo/Redis/HTTP/console.
         ├── Persistence/Mongo/   # Doctrine ODM document + repository
         ├── ReadModel/Redis/     # Redis-backed read model repository
-        ├── Http/                # HealthCheckController
-        └── Console/             # HealthCheckCommand
+        ├── Http/                # HealthCheck + provision/service/get controllers
+        └── Console/             # HealthCheck + vending-machine commands
 ```
 
 This is a hexagonal/ports-and-adapters layout: `Domain` and `Application`
@@ -117,21 +171,24 @@ identical service wiring.
 
 A single Symfony Messenger command bus (`config/services.yaml`,
 `command.bus`) is configured with a synchronous, in-memory
-`HandlersLocator`. Every use case is a command dispatched through it and
-handled by exactly one handler, which is the shape the real vending-machine
-commands (insert coin, select product, return coin, service) will follow —
-today there is only `HealthCheck` to exercise the wiring.
+`HandlersLocator`. Every use case is a command or query dispatched through it
+and handled by exactly one handler: `ProvisionVendingMachine`,
+`ServiceVendingMachine`, the `GetVendingMachineState` query and the
+`HealthCheck` smoke test all go through it. The remaining vending-machine
+commands (insert coin, select product, return coin) will follow the same
+shape.
 
 ### MongoDB (write model) / Redis (read model)
 
 `VendingMachineDocument` (Doctrine ODM) is intentionally a separate class
 from the `VendingMachine` domain aggregate; `MongoVendingMachineRepository`
-is the only place that translates between them, and already carries a
-`version` field for optimistic concurrency. The Redis read model
+is the only place that translates between them, and carries a `version` field
+for optimistic concurrency. The Redis read model
 (`RedisVendingMachineStateReadModelRepository`) stores one JSON document per
 machine and is reachable only through the `VendingMachineStateReadModelRepository`
-port — no mapping logic yet, since there is no state worth projecting until
-the first real use case lands.
+port. Both write commands project a `MachineStateView` into it (provisioning
+seeds it, servicing replaces it), and `GetVendingMachineState` serves reads
+straight from it without touching the write side.
 
 ## Extending it
 
@@ -139,9 +196,10 @@ the first real use case lands.
   register it in `command_bus.handlers_locator` (services.yaml), and add a
   driving adapter (an HTTP route + controller, and/or a console command)
   that dispatches it through the bus.
-* **New product, coin, or business rule** — none of these exist yet beyond
-  the generic `Product`/`Denomination` value objects; they'll be introduced
-  alongside the first real use case rather than hardcoded in advance.
+* **New product, coin, or business rule** — products stay generic
+  (`Product`/`Denomination` value objects); a machine is stocked by declaring
+  concrete rows, never by hardcoding a catalogue. New rules belong on the
+  `VendingMachine` aggregate and are rejected with a domain exception.
 * **New channel** — add a new adapter under `Infrastructure/` that
   dispatches existing commands/queries through the same bus. The HTTP
   controller and console command are the template: no business logic,
@@ -155,5 +213,10 @@ the first real use case lands.
 * `$_ENV`-based configuration in the infrastructure factories is simple but
   bypasses Symfony's `%env()%` parameter resolution; fine for three
   variables, worth revisiting if configuration grows.
-* No snapshotting, projections, or business rules exist yet — intentionally
-  out of scope for this bootstrap step.
+* The read-model port still speaks a raw state array; `MachineStateView` is the
+  typed projection on top of it. Folding the DTO into the port signature is a
+  natural next step once a second projection shape exists.
+* There is no customer-facing use case yet (inserting funds and selecting a
+  product through the API, returning change). The aggregate can already record
+  inserted funds — and the mid-transaction guard is exercised through that —
+  but no driving adapter exposes insertion until the next slice lands.

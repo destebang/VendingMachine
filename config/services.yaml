@@ -36,13 +36,23 @@ services:
     Predis\ClientInterface:
         factory: ['App\Kernel\RedisClientFactory', 'create']
 
+    MongoDB\Collection:
+        factory: ['App\Kernel\MongoCollectionFactory', 'domainEvents']
+
+    # --- Logging ------------------------------------------------------------
+    Psr\Log\LoggerInterface:
+        class: Symfony\Component\HttpKernel\Log\Logger
+
     # --- Command bus (Messenger, sync, in-memory) ---------------------------
     Symfony\Component\Messenger\MessageBusInterface: '@command.bus'
 
     command.bus:
         class: Symfony\Component\Messenger\MessageBus
+        # Public so the integration suite can dispatch commands through the
+        # exact same bus the driving adapters use, wiring included.
+        public: true
         arguments:
-            - ['@command_bus.handle_message_middleware']
+            - ['@App\Shared\Infrastructure\EventBus\ReleaseDomainEventsMiddleware', '@command_bus.handle_message_middleware']
 
     command_bus.handle_message_middleware:
         class: Symfony\Component\Messenger\Middleware\HandleMessageMiddleware
@@ -67,3 +77,38 @@ services:
                     - '@App\VendingMachine\Application\ReturnCoin\ReturnCoinHandler'
                 App\VendingMachine\Application\GetVendingMachineState\GetVendingMachineState:
                     - '@App\VendingMachine\Application\GetVendingMachineState\GetVendingMachineStateHandler'
+
+    # --- Domain event bus (Messenger, sync, in-memory) ----------------------
+    App\Shared\Domain\Event\DomainEventBus:
+        alias: App\Shared\Infrastructure\EventBus\MessengerDomainEventBus
+
+    App\Shared\Infrastructure\EventBus\MessengerDomainEventBus:
+        arguments:
+            $bus: '@event.bus'
+
+    event.bus:
+        class: Symfony\Component\Messenger\MessageBus
+        arguments:
+            - ['@event_bus.handle_message_middleware']
+
+    event_bus.handle_message_middleware:
+        class: Symfony\Component\Messenger\Middleware\HandleMessageMiddleware
+        arguments:
+            - '@event_bus.handlers_locator'
+
+    event_bus.handlers_locator:
+        class: Symfony\Component\Messenger\Handler\HandlersLocator
+        arguments:
+            -
+                App\VendingMachine\Domain\Event\VendingMachineProvisioned:
+                    - '@App\Shared\Infrastructure\EventBus\MongoDomainEventStore'
+                App\VendingMachine\Domain\Event\VendingMachineServiced:
+                    - '@App\Shared\Infrastructure\EventBus\MongoDomainEventStore'
+                App\VendingMachine\Domain\Event\CoinInserted:
+                    - '@App\Shared\Infrastructure\EventBus\MongoDomainEventStore'
+                App\VendingMachine\Domain\Event\ItemVended:
+                    - '@App\Shared\Infrastructure\EventBus\MongoDomainEventStore'
+                App\VendingMachine\Domain\Event\InsertedFundsReturned:
+                    - '@App\Shared\Infrastructure\EventBus\MongoDomainEventStore'
+                App\VendingMachine\Domain\Event\InsertedFundsReturnedDueToInsufficientChange:
+                    - '@App\Shared\Infrastructure\EventBus\MongoDomainEventStore'

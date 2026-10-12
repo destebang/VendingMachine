@@ -7,6 +7,7 @@ namespace App\Tests\Functional;
 use App\Kernel\ContainerFactory;
 use App\Kernel\DocumentManagerFactory;
 use App\Kernel\HttpApplication;
+use App\Shared\Infrastructure\EventBus\DomainEventCollector;
 use App\VendingMachine\Domain\Model\Denomination;
 use App\VendingMachine\Domain\Model\Money;
 use App\VendingMachine\Domain\Model\VendingMachine;
@@ -88,7 +89,7 @@ final class ProvisionAndServiceHttpTest extends TestCase
 
     public function test_servicing_while_a_transaction_is_pending_is_rejected(): void
     {
-        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create(), new DomainEventCollector());
         $id = VendingMachineId::generate();
 
         $machine = VendingMachine::create($id);

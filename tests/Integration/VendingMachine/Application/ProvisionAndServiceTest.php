@@ -6,6 +6,7 @@ namespace App\Tests\Integration\VendingMachine\Application;
 
 use App\Kernel\DocumentManagerFactory;
 use App\Kernel\RedisClientFactory;
+use App\Shared\Infrastructure\EventBus\DomainEventCollector;
 use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachine;
 use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachineHandler;
 use App\VendingMachine\Application\ReadModel\MachineStateView;
@@ -39,7 +40,10 @@ final class ProvisionAndServiceTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $this->repository = new MongoVendingMachineRepository(
+            DocumentManagerFactory::create(),
+            new DomainEventCollector(),
+        );
         $this->readModel = new RedisVendingMachineStateReadModelRepository(RedisClientFactory::create());
         $this->provision = new ProvisionVendingMachineHandler($this->repository, $this->readModel);
         $this->service = new ServiceVendingMachineHandler($this->repository, $this->readModel);

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\VendingMachine\Infrastructure;
 
 use App\Kernel\DocumentManagerFactory;
+use App\Shared\Infrastructure\EventBus\DomainEventCollector;
 use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
 use App\VendingMachine\Domain\Model\CashReserve;
 use App\VendingMachine\Domain\Model\InsertedFunds;
@@ -20,7 +21,7 @@ final class MongoVendingMachineRepositoryTest extends TestCase
 {
     public function test_it_persists_and_retrieves_a_vending_machine(): void
     {
-        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create(), new DomainEventCollector());
         $id = VendingMachineId::generate();
 
         self::assertNull($repository->find($id));
@@ -35,7 +36,7 @@ final class MongoVendingMachineRepositoryTest extends TestCase
 
     public function test_it_round_trips_stock_reserve_and_inserted_funds(): void
     {
-        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create(), new DomainEventCollector());
         $id = VendingMachineId::generate();
 
         $repository->save(VendingMachine::reconstitute(
@@ -62,7 +63,7 @@ final class MongoVendingMachineRepositoryTest extends TestCase
 
     public function test_get_returns_the_stored_machine(): void
     {
-        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create(), new DomainEventCollector());
         $id = VendingMachineId::generate();
 
         $repository->save(VendingMachine::create($id));
@@ -74,7 +75,7 @@ final class MongoVendingMachineRepositoryTest extends TestCase
 
     public function test_get_fails_when_the_machine_does_not_exist(): void
     {
-        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create(), new DomainEventCollector());
 
         $this->expectException(VendingMachineNotFoundException::class);
 

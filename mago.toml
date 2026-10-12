@@ -37,9 +37,14 @@ layering = [
 layering-reason = "Outer layers may depend on inner layers, never the reverse."
 
 [[guard.perimeter.rules]]
-namespace = "App\\VendingMachine\\Domain\\"
+namespace = "App\\Shared\\Domain\\"
 permit = ["@self", "@native"]
-reason = "The Domain layer may only use itself and PHP built-ins."
+reason = "The shared Domain kernel may only use itself and PHP built-ins."
+
+[[guard.perimeter.rules]]
+namespace = "App\\VendingMachine\\Domain\\"
+permit = ["@self", "@native", "App\\Shared\\Domain\\Event\\**"]
+reason = "The Domain layer may only use itself, the shared Domain event contracts and PHP built-ins."
 
 [[guard.perimeter.rules]]
 namespace = "App\\VendingMachine\\Application\\"

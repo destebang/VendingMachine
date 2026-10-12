@@ -4,6 +4,12 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\VendingMachine\Domain\Model;
 
+use App\VendingMachine\Domain\Event\CoinInserted;
+use App\VendingMachine\Domain\Event\InsertedFundsReturned;
+use App\VendingMachine\Domain\Event\InsertedFundsReturnedDueToInsufficientChange;
+use App\VendingMachine\Domain\Event\ItemVended;
+use App\VendingMachine\Domain\Event\VendingMachineProvisioned;
+use App\VendingMachine\Domain\Event\VendingMachineServiced;
 use App\VendingMachine\Domain\Exception\InsufficientChangeAvailableException;
 use App\VendingMachine\Domain\Exception\InsufficientFundsException;
 use App\VendingMachine\Domain\Exception\InvalidDenominationException;
@@ -329,6 +335,214 @@ final class VendingMachineTest extends TestCase
             self::assertSame(0, $state->insertedFunds->amount()->amountInCents());
             self::assertSame(10, $state->stock->quantityOf('WATER'));
             self::assertTrue($state->cashReserve->isEmpty());
+        }
+    }
+
+    public function test_create_records_a_vending_machine_provisioned_event(): void
+    {
+        $machine = VendingMachine::create(VendingMachineId::generate());
+
+        $events = $machine->releaseEvents();
+
+        self::assertCount(1, $events);
+        self::assertInstanceOf(VendingMachineProvisioned::class, $events[0]);
+        self::assertSame($machine->state()->id->toString(), $events[0]->aggregateId());
+    }
+
+    public function test_reconstituting_from_persisted_state_records_no_events(): void
+    {
+        self::assertSame([], $this->stockedMachine()->releaseEvents());
+    }
+
+    public function test_release_events_returns_every_recorded_event_and_clears_them(): void
+    {
+        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+
+        $events = $machine->releaseEvents();
+
+        self::assertCount(2, $events);
+        self::assertInstanceOf(VendingMachineProvisioned::class, $events[0]);
+        self::assertInstanceOf(CoinInserted::class, $events[1]);
+        self::assertSame([], $machine->releaseEvents());
+    }
+
+    public function test_service_records_a_vending_machine_serviced_event(): void
+    {
+        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine->releaseEvents();
+
+        $machine->service(
+            Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
+            CashReserve::fromCounts([100 => 5]),
+        );
+
+        $events = $machine->releaseEvents();
+
+        self::assertCount(1, $events);
+        /** @var VendingMachineServiced $event */
+        $event = $events[0];
+        self::assertInstanceOf(VendingMachineServiced::class, $event);
+        self::assertSame(10, $event->state->stock->quantityOf('WATER'));
+        self::assertSame([100 => 5], $event->state->cashReserve->counts());
+    }
+
+    public function test_a_service_rejected_while_a_transaction_is_pending_records_no_event(): void
+    {
+        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+        $machine->releaseEvents();
+
+        try {
+            $machine->service(
+                Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
+                CashReserve::fromCounts([100 => 5]),
+            );
+            self::fail('Expected the service action to be rejected while a transaction is pending.');
+        } catch (PendingTransactionInProgressException) {
+            self::assertSame([], $machine->releaseEvents());
+        }
+    }
+
+    public function test_inserting_an_accepted_coin_records_a_coin_inserted_event(): void
+    {
+        $machine = $this->stockedMachine();
+
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+
+        $events = $machine->releaseEvents();
+
+        self::assertCount(1, $events);
+        /** @var CoinInserted $event */
+        $event = $events[0];
+        self::assertInstanceOf(CoinInserted::class, $event);
+        self::assertSame(25, $event->denomination->amount()->amountInCents());
+        self::assertSame(25, $event->state->insertedFunds->amount()->amountInCents());
+    }
+
+    public function test_a_rejected_denomination_records_no_event(): void
+    {
+        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine->releaseEvents();
+
+        try {
+            $machine->insertCoin(Denomination::of(Money::fromCents(50)));
+            self::fail('Expected the inserted coin to be rejected.');
+        } catch (InvalidDenominationException) {
+            self::assertSame([], $machine->releaseEvents());
+        }
+    }
+
+    public function test_returning_inserted_funds_records_an_inserted_funds_returned_event(): void
+    {
+        $machine = $this->stockedMachine();
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+        $machine->insertCoin(Denomination::of(Money::fromCents(10)));
+        $machine->releaseEvents();
+
+        $machine->returnInsertedFunds();
+
+        $events = $machine->releaseEvents();
+
+        self::assertCount(1, $events);
+        /** @var InsertedFundsReturned $event */
+        $event = $events[0];
+        self::assertInstanceOf(InsertedFundsReturned::class, $event);
+        self::assertSame([25, 10], $event->returnedFunds->denominationsInCents());
+        self::assertSame(0, $event->state->insertedFunds->amount()->amountInCents());
+    }
+
+    public function test_returning_with_nothing_inserted_still_records_the_return(): void
+    {
+        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine->releaseEvents();
+
+        $machine->returnInsertedFunds();
+
+        $events = $machine->releaseEvents();
+
+        self::assertCount(1, $events);
+        /** @var InsertedFundsReturned $event */
+        $event = $events[0];
+        self::assertInstanceOf(InsertedFundsReturned::class, $event);
+        self::assertTrue($event->returnedFunds->isEmpty());
+    }
+
+    public function test_a_successful_selection_records_an_item_vended_event(): void
+    {
+        $machine = $this->stockedMachine();
+        $machine->insertCoin(Denomination::of(Money::fromCents(100)));
+        $machine->releaseEvents();
+
+        $vendedItem = $machine->selectItem('WATER');
+
+        $events = $machine->releaseEvents();
+
+        self::assertCount(1, $events);
+        /** @var ItemVended $event */
+        $event = $events[0];
+        self::assertInstanceOf(ItemVended::class, $event);
+        self::assertSame($vendedItem, $event->vendedItem);
+        self::assertSame(9, $event->state->stock->quantityOf('WATER'));
+        self::assertSame(0, $event->state->insertedFunds->amount()->amountInCents());
+    }
+
+    public function test_an_insufficient_funds_selection_records_no_event(): void
+    {
+        $machine = $this->stockedMachine();
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+        $machine->releaseEvents();
+
+        try {
+            $machine->selectItem('WATER');
+            self::fail('Expected the selection to be rejected for insufficient funds.');
+        } catch (InsufficientFundsException) {
+            self::assertSame([], $machine->releaseEvents());
+        }
+    }
+
+    public function test_an_out_of_stock_selection_records_no_event(): void
+    {
+        $machine = $this->stockedMachine(waterStock: 0);
+        $machine->insertCoin(Denomination::of(Money::fromCents(100)));
+        $machine->releaseEvents();
+
+        try {
+            $machine->selectItem('WATER');
+            self::fail('Expected the selection to be rejected as out of stock.');
+        } catch (OutOfStockException) {
+            self::assertSame([], $machine->releaseEvents());
+        }
+    }
+
+    public function test_an_exact_change_rejection_records_funds_returned_before_throwing(): void
+    {
+        $machine = VendingMachine::reconstitute(
+            VendingMachineId::generate(),
+            InsertedFunds::none(),
+            Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
+            CashReserve::empty(),
+            0,
+        );
+
+        foreach ([25, 25, 25, 10, 10, 5] as $denominationInCents) {
+            $machine->insertCoin(Denomination::of(Money::fromCents($denominationInCents)));
+        }
+        $machine->releaseEvents();
+
+        try {
+            $machine->selectItem('WATER');
+            self::fail('Expected the selection to be rejected for insufficient change.');
+        } catch (InsufficientChangeAvailableException) {
+            $events = $machine->releaseEvents();
+
+            self::assertCount(1, $events);
+            /** @var InsertedFundsReturnedDueToInsufficientChange $event */
+            $event = $events[0];
+            self::assertInstanceOf(InsertedFundsReturnedDueToInsufficientChange::class, $event);
+            self::assertSame([25, 25, 25, 10, 10, 5], $event->returnedFunds->denominationsInCents());
+            self::assertSame(0, $event->state->insertedFunds->amount()->amountInCents());
+            self::assertSame(10, $event->state->stock->quantityOf('WATER'));
         }
     }
 

@@ -4,6 +4,13 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Domain\Model;
 
+use App\Shared\Domain\Event\DomainEvent;
+use App\VendingMachine\Domain\Event\CoinInserted;
+use App\VendingMachine\Domain\Event\InsertedFundsReturned;
+use App\VendingMachine\Domain\Event\InsertedFundsReturnedDueToInsufficientChange;
+use App\VendingMachine\Domain\Event\ItemVended;
+use App\VendingMachine\Domain\Event\VendingMachineProvisioned;
+use App\VendingMachine\Domain\Event\VendingMachineServiced;
 use App\VendingMachine\Domain\Exception\InsufficientChangeAvailableException;
 use App\VendingMachine\Domain\Exception\InsufficientFundsException;
 use App\VendingMachine\Domain\Exception\InvalidDenominationException;
@@ -22,6 +29,10 @@ use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
  *
  * The aggregate exposes behaviour, not its fields: everything the outside world
  * reads comes out through a single `state()` snapshot.
+ *
+ * Every mutation records a domain event describing it. The aggregate does not
+ * publish them: it only releases what it has recorded, so the application
+ * layer can decide when and how to publish.
  */
 final class VendingMachine
 {
@@ -35,6 +46,14 @@ final class VendingMachine
      */
     public const ACCEPTED_DENOMINATIONS_IN_CENTS = [5, 10, 25, 100];
 
+    /**
+     * The domain events recorded since the last release, in the order the
+     * mutations happened.
+     *
+     * @var list<DomainEvent>
+     */
+    private array $recordedEvents = [];
+
     private function __construct(
         private readonly VendingMachineId $id,
         private InsertedFunds $insertedFunds,
@@ -45,16 +64,20 @@ final class VendingMachine
 
     /**
      * A brand-new, unstocked machine: empty stock, empty reserve, no inserted
-     * funds.
+     * funds. Records the machine's first event.
      */
     public static function create(VendingMachineId $id): self
     {
-        return new self($id, InsertedFunds::none(), Stock::empty(), CashReserve::empty(), 0);
+        $vendingMachine = new self($id, InsertedFunds::none(), Stock::empty(), CashReserve::empty(), 0);
+        $vendingMachine->record(new VendingMachineProvisioned($id, $vendingMachine->state()));
+
+        return $vendingMachine;
     }
 
     /**
      * Reconstructs an aggregate from persisted state, e.g. when loaded by a
-     * repository. Not for application code to call directly.
+     * repository. Not for application code to call directly. Records no event:
+     * the state was produced by mutations that already happened.
      */
     public static function reconstitute(
         VendingMachineId $id,
@@ -97,6 +120,8 @@ final class VendingMachine
         }
 
         $this->insertedFunds = $this->insertedFunds->plus($coin);
+
+        $this->record(new CoinInserted($this->id, $this->state(), $coin));
     }
 
     /**
@@ -106,12 +131,14 @@ final class VendingMachine
      * The funds handed back are *exactly* the coins the customer inserted —
      * never a set drawn from the cash reserve — and the inserted balance is
      * reset to zero. A no-op when nothing has been inserted: the returned funds
-     * are simply empty.
+     * are simply empty, though the action still records its event.
      */
     public function returnInsertedFunds(): InsertedFunds
     {
         $returnedFunds = $this->insertedFunds;
         $this->insertedFunds = InsertedFunds::none();
+
+        $this->record(new InsertedFundsReturned($this->id, $this->state(), $returnedFunds));
 
         return $returnedFunds;
     }
@@ -132,6 +159,11 @@ final class VendingMachine
      *   the inserted funds untouched so the customer can top up;
      * - change the reserve cannot make (`InsufficientChangeAvailableException`)
      *   returns every inserted coin, resetting the balance to zero.
+     *
+     * A success records `ItemVended`, and an exact-change rejection records
+     * `InsertedFundsReturnedDueToInsufficientChange` before it throws. The
+     * `OutOfStock` and `InsufficientFunds` rejections throw before any mutation
+     * and record nothing.
      */
     public function selectItem(string $selectorCode): VendedItem
     {
@@ -152,8 +184,13 @@ final class VendingMachine
 
         if (!$this->cashReserve->canMake($changeDue)) {
             // Exact change only: the machine cannot make the required change, so
-            // the sale is rejected and every inserted coin is handed back.
+            // the sale is rejected and every inserted coin is handed back. The
+            // rejection is recorded before it is thrown — the machine has
+            // already changed.
+            $returnedFunds = $this->insertedFunds;
             $this->insertedFunds = InsertedFunds::none();
+
+            $this->record(new InsertedFundsReturnedDueToInsufficientChange($this->id, $this->state(), $returnedFunds));
 
             throw InsufficientChangeAvailableException::forAmount($changeDue);
         }
@@ -164,7 +201,10 @@ final class VendingMachine
         $product->decreaseStock();
         $this->insertedFunds = InsertedFunds::none();
 
-        return new VendedItem($selectorCode, $price, $change);
+        $vendedItem = new VendedItem($selectorCode, $price, $change);
+        $this->record(new ItemVended($this->id, $this->state(), $vendedItem));
+
+        return $vendedItem;
     }
 
     /**
@@ -173,7 +213,8 @@ final class VendingMachine
      * the true current physical state, never a delta.
      *
      * Rejected while a customer transaction is in flight, so a service visit
-     * can never rewrite the machine out from under inserted funds.
+     * can never rewrite the machine out from under inserted funds. A rejected
+     * service throws before any mutation and records nothing.
      */
     public function service(Stock $stock, CashReserve $cashReserve): void
     {
@@ -183,6 +224,23 @@ final class VendingMachine
 
         $this->stock = $stock;
         $this->cashReserve = $cashReserve;
+
+        $this->record(new VendingMachineServiced($this->id, $this->state()));
+    }
+
+    /**
+     * Returns the domain events recorded since the last release, in the order
+     * they happened, and clears the list so each event is handed out exactly
+     * once.
+     *
+     * @return list<DomainEvent>
+     */
+    public function releaseEvents(): array
+    {
+        $events = $this->recordedEvents;
+        $this->recordedEvents = [];
+
+        return $events;
     }
 
     /**
@@ -193,5 +251,10 @@ final class VendingMachine
     private function hasPendingTransaction(): bool
     {
         return !$this->insertedFunds->isEmpty();
+    }
+
+    private function record(DomainEvent $event): void
+    {
+        $this->recordedEvents[] = $event;
     }
 }

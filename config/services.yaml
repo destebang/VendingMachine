@@ -8,7 +8,9 @@ services:
         resource: '../src/*'
         exclude:
             - '../src/Kernel'
+            - '../src/Shared/Domain'
             - '../src/VendingMachine/Domain/Model'
+            - '../src/VendingMachine/Domain/Event'
             - '../src/VendingMachine/Domain/Exception'
             - '../src/VendingMachine/Infrastructure/Persistence/Mongo/VendingMachineDocument.php'
 

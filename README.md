@@ -162,7 +162,8 @@ docker compose exec -e MONGO_DB=vending_test -e REDIS_URL=redis://redis:6379/1 \
   returning inserted funds (the exact coins handed back, the no-op case and the
   reserve staying untouched), change-making (largest denominations first,
   backtracking when a greedy choice cannot be completed) and all four selection
-  outcomes.
+  outcomes. It also covers the domain events: the event each mutation records
+  (and its payload) and the rejections that record nothing.
 * **Integration** (`tests/Integration`) — the MongoDB repository, the Redis
   read-model repository and the
   provision/service/insert-coin/select-item/return-coin use cases against real
@@ -232,10 +233,13 @@ src/
 ├── Kernel/                     # Hand-assembled bootstrap: DI container,
 │                                # HTTP front controller, infra factories.
 │                                # No business logic lives here.
+├── Shared/                     # Cross-aggregate, framework-free building blocks
+│   └── Domain/Event/           # DomainEvent + DomainEventBus contracts
 └── VendingMachine/
     ├── Domain/                 # Pure business logic. No framework, no I/O.
     │   ├── Model/               # Money, Denomination, Product, ChangeDue,
     │   │                        # VendedItem, VendingMachineId, VendingMachine
+    │   ├── Event/               # Recorded domain events (base + 6 concrete)
     │   ├── Repository/          # VendingMachineRepository (port)
     │   └── Exception/
     ├── Application/            # Use cases: orchestrates the domain,
@@ -283,6 +287,20 @@ and handled by exactly one handler: `ProvisionVendingMachine`,
 `ServiceVendingMachine`, `InsertCoin`, `SelectItem`, `ReturnCoin`, the
 `GetVendingMachineState` query and the `HealthCheck` smoke test all go through
 it.
+
+### Domain events (write-side foundation)
+
+Every mutation on the `VendingMachine` aggregate records a domain event: a
+readonly, timestamp-free fact carrying the aggregate identity and the full
+resulting state, plus the action's own data (the coin inserted, the item
+vended, the funds returned). Rejections that throw before mutating record
+nothing, and an exact-change rejection records the refund before it throws.
+
+The aggregate does not publish events yet — it releases what it has recorded
+through `releaseEvents()`. The events live in `App\VendingMachine\Domain\Event\`
+and reuse the cross-aggregate, framework-free `App\Shared\Domain\Event\`
+contracts (`DomainEvent`, `DomainEventBus`), so a later slice can publish them
+and another aggregate can record its own against the same interface.
 
 ### MongoDB (write model) / Redis (read model)
 

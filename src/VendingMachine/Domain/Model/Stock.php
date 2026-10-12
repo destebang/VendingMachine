@@ -11,15 +11,14 @@ namespace App\VendingMachine\Domain\Model;
  * identifies exactly one loaded product lives in a single place. The products
  * it holds are the `Product` entities themselves.
  */
-final class Stock
+final readonly class Stock
 {
     /**
      * @param array<string, Product> $products
      */
     private function __construct(
-        private readonly array $products,
-    ) {
-    }
+        private array $products,
+    ) {}
 
     public static function empty(): self
     {
@@ -46,7 +45,7 @@ final class Stock
 
     public function has(string $selectorCode): bool
     {
-        return isset($this->products[$selectorCode]);
+        return array_key_exists($selectorCode, $this->products);
     }
 
     public function product(string $selectorCode): ?Product

@@ -19,8 +19,7 @@ final class InsertCoin
     public function __construct(
         public readonly VendingMachineId $vendingMachineId,
         public readonly Denomination $denomination,
-    ) {
-    }
+    ) {}
 
     /**
      * Builds the command from already-decoded transport input (HTTP JSON body,

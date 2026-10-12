@@ -15,6 +15,7 @@ final class HealthCheckCommandTest extends TestCase
     {
         $container = ContainerFactory::create();
 
+        /** @var HealthCheckCommand $command */
         $command = $container->get(HealthCheckCommand::class);
         $tester = new CommandTester($command);
 
@@ -22,7 +23,8 @@ final class HealthCheckCommandTest extends TestCase
 
         self::assertSame(0, $exitCode);
 
-        $payload = json_decode($tester->getDisplay(), true, flags: JSON_THROW_ON_ERROR);
+        /** @var array{mongo: bool, redis: bool, healthy: bool} $payload */
+        $payload = json_decode($tester->getDisplay(), associative: true, flags: JSON_THROW_ON_ERROR);
 
         self::assertTrue($payload['mongo']);
         self::assertTrue($payload['redis']);

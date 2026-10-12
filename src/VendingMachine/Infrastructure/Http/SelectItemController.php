@@ -36,9 +36,9 @@ final class SelectItemController
     {
         try {
             /** @var array{selectorCode?: string} $payload */
-            $payload = json_decode((string) $request->getContent(), true, flags: JSON_THROW_ON_ERROR);
+            $payload = json_decode($request->getContent(), associative: true, flags: JSON_THROW_ON_ERROR);
 
-            $command = SelectItem::fromInput($id, (string) ($payload['selectorCode'] ?? ''));
+            $command = SelectItem::fromInput($id, $payload['selectorCode'] ?? '');
         } catch (Throwable $exception) {
             return new JsonResponse([
                 'error' => 'InvalidRequest',

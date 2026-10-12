@@ -41,8 +41,7 @@ final class VendingMachine
         private Stock $stock,
         private CashReserve $cashReserve,
         private int $version,
-    ) {
-    }
+    ) {}
 
     /**
      * A brand-new, unstocked machine: empty stock, empty reserve, no inserted

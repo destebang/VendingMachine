@@ -15,8 +15,7 @@ final class ReturnCoin
 {
     public function __construct(
         public readonly VendingMachineId $vendingMachineId,
-    ) {
-    }
+    ) {}
 
     /**
      * Builds the command from already-decoded transport input (HTTP path

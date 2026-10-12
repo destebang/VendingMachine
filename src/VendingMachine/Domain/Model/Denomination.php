@@ -14,12 +14,11 @@ use App\VendingMachine\Domain\Exception\InvalidDenominationException;
  * Whether a given amount is *accepted* by a particular machine is a separate
  * concern from what the coin is worth.
  */
-final class Denomination
+final readonly class Denomination
 {
     private function __construct(
-        private readonly Money $amount,
-    ) {
-    }
+        private Money $amount,
+    ) {}
 
     /**
      * A coin or note of the given amount, without judging whether it is

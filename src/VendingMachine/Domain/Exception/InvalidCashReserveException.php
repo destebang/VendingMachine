@@ -10,10 +10,7 @@ final class InvalidCashReserveException extends InvalidArgumentException
 {
     public static function nonPositiveDenomination(int $denominationInCents): self
     {
-        return new self(sprintf(
-            'A denomination must be a positive amount of cents, got %d.',
-            $denominationInCents,
-        ));
+        return new self(sprintf('A denomination must be a positive amount of cents, got %d.', $denominationInCents));
     }
 
     public static function negativeQuantity(int $denominationInCents, int $quantity): self

@@ -21,15 +21,11 @@ final class HealthCheckHandler
     public function __construct(
         private readonly VendingMachineRepository $vendingMachineRepository,
         private readonly VendingMachineStateReadModelRepository $readModel,
-    ) {
-    }
+    ) {}
 
     public function __invoke(HealthCheck $command): HealthCheckResult
     {
-        return new HealthCheckResult(
-            mongoOk: $this->canRoundTripWriteModel(),
-            redisOk: $this->canRoundTripReadModel(),
-        );
+        return new HealthCheckResult(mongoOk: $this->canRoundTripWriteModel(), redisOk: $this->canRoundTripReadModel());
     }
 
     private function canRoundTripWriteModel(): bool

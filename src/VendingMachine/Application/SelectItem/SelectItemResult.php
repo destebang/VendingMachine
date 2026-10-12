@@ -17,8 +17,7 @@ final class SelectItemResult
     public function __construct(
         public readonly VendedItem $vendedItem,
         public readonly MachineStateView $state,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array{

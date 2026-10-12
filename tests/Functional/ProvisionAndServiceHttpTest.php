@@ -15,6 +15,7 @@ use App\VendingMachine\Infrastructure\Persistence\Mongo\MongoVendingMachineRepos
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Routing\RouteCollection;
 
 final class ProvisionAndServiceHttpTest extends TestCase
 {
@@ -23,7 +24,8 @@ final class ProvisionAndServiceHttpTest extends TestCase
     protected function setUp(): void
     {
         $container = ContainerFactory::create();
-        $routes = require dirname(__DIR__, 2) . '/config/routes.php';
+        /** @var RouteCollection $routes */
+        $routes = require dirname(__DIR__, levels: 2) . '/config/routes.php';
 
         $this->application = new HttpApplication($container, $routes);
     }
@@ -34,14 +36,14 @@ final class ProvisionAndServiceHttpTest extends TestCase
 
         self::assertSame(Response::HTTP_CREATED, $provisionResponse->getStatusCode());
 
-        $id = json_decode((string) $provisionResponse->getContent(), true, flags: JSON_THROW_ON_ERROR)['id'];
+        $id = $this->payload($provisionResponse)['id'];
 
         $initial = $this->application->handle(Request::create('/vending-machines/' . $id, 'GET'));
 
         self::assertSame(Response::HTTP_OK, $initial->getStatusCode());
         self::assertSame(
             ['id' => $id, 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 0],
-            json_decode((string) $initial->getContent(), true, flags: JSON_THROW_ON_ERROR),
+            $this->payload($initial),
         );
 
         $serviceResponse = $this->application->handle($this->serviceRequest($id, [
@@ -53,28 +55,33 @@ final class ProvisionAndServiceHttpTest extends TestCase
 
         $afterService = $this->application->handle(Request::create('/vending-machines/' . $id, 'GET'));
 
-        self::assertSame([
-            'id' => $id,
-            'stock' => [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10]],
-            'cashReserve' => [['denominationInCents' => 100, 'quantity' => 5]],
-            'insertedFundsInCents' => 0,
-        ], json_decode((string) $afterService->getContent(), true, flags: JSON_THROW_ON_ERROR));
+        self::assertSame(
+            [
+                'id' => $id,
+                'stock' => [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10]],
+                'cashReserve' => [['denominationInCents' => 100, 'quantity' => 5]],
+                'insertedFundsInCents' => 0,
+            ],
+            $this->payload($afterService),
+        );
     }
 
     public function test_reading_an_unknown_machine_returns_not_found(): void
     {
-        $response = $this->application->handle(
-            Request::create('/vending-machines/' . VendingMachineId::generate()->toString(), 'GET'),
-        );
+        $response = $this->application->handle(Request::create(
+            '/vending-machines/' . VendingMachineId::generate()->toString(),
+            'GET',
+        ));
 
         self::assertSame(Response::HTTP_NOT_FOUND, $response->getStatusCode());
     }
 
     public function test_servicing_an_unknown_machine_returns_not_found(): void
     {
-        $response = $this->application->handle(
-            $this->serviceRequest(VendingMachineId::generate()->toString(), ['stock' => [], 'cashReserve' => []]),
-        );
+        $response = $this->application->handle($this->serviceRequest(VendingMachineId::generate()->toString(), [
+            'stock' => [],
+            'cashReserve' => [],
+        ]));
 
         self::assertSame(Response::HTTP_NOT_FOUND, $response->getStatusCode());
     }
@@ -95,7 +102,7 @@ final class ProvisionAndServiceHttpTest extends TestCase
 
         self::assertSame(Response::HTTP_CONFLICT, $response->getStatusCode());
 
-        $payload = json_decode((string) $response->getContent(), true, flags: JSON_THROW_ON_ERROR);
+        $payload = $this->payload($response);
 
         self::assertSame('PendingTransactionInProgress', $payload['error']);
 
@@ -104,6 +111,41 @@ final class ProvisionAndServiceHttpTest extends TestCase
         self::assertNotNull($stored);
         self::assertTrue($stored->state()->stock->isEmpty());
         self::assertTrue($stored->state()->cashReserve->isEmpty());
+    }
+
+    /**
+     * The union of every key the JSON API can return, so a test can read any of
+     * them without re-checking. A test never reads a key the response omits.
+     *
+     * @return array{
+     *     id: string,
+     *     selectorCode: string,
+     *     priceInCents: int,
+     *     change: list<int>,
+     *     returnedCoins: list<int>,
+     *     insertedFundsInCents: int,
+     *     stock: list<array{selectorCode: string, priceInCents: int, stock: int}>,
+     *     cashReserve: list<array{denominationInCents: int, quantity: int}>,
+     *     error: string
+     * }
+     */
+    private function payload(Response $response): array
+    {
+        /** @var array{
+         *     id: string,
+         *     selectorCode: string,
+         *     priceInCents: int,
+         *     change: list<int>,
+         *     returnedCoins: list<int>,
+         *     insertedFundsInCents: int,
+         *     stock: list<array{selectorCode: string, priceInCents: int, stock: int}>,
+         *     cashReserve: list<array{denominationInCents: int, quantity: int}>,
+         *     error: string
+         * } $payload */
+        $payload = json_decode((string) $response->getContent(), associative: true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($payload);
+
+        return $payload;
     }
 
     /**

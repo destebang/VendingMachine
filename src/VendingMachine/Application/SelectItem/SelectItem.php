@@ -17,8 +17,7 @@ final class SelectItem
     public function __construct(
         public readonly VendingMachineId $vendingMachineId,
         public readonly string $selectorCode,
-    ) {
-    }
+    ) {}
 
     /**
      * Builds the command from already-decoded transport input (HTTP JSON body,

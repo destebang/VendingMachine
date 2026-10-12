@@ -16,8 +16,7 @@ final class GetVendingMachineStateHandler
 {
     public function __construct(
         private readonly VendingMachineStateReadModelRepository $readModel,
-    ) {
-    }
+    ) {}
 
     public function __invoke(GetVendingMachineState $query): ?MachineStateView
     {

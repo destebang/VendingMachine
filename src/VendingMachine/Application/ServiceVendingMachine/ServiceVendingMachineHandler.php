@@ -19,8 +19,7 @@ final class ServiceVendingMachineHandler
     public function __construct(
         private readonly VendingMachineRepository $vendingMachineRepository,
         private readonly VendingMachineStateReadModelRepository $readModel,
-    ) {
-    }
+    ) {}
 
     public function __invoke(ServiceVendingMachine $command): ServiceVendingMachineResult
     {

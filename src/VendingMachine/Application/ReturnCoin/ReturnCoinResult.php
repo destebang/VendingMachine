@@ -19,8 +19,7 @@ final class ReturnCoinResult
     public function __construct(
         public readonly array $returnedCoinsInCents,
         public readonly MachineStateView $state,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array{

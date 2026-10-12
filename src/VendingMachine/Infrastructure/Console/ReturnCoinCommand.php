@@ -21,7 +21,10 @@ use Throwable;
  * CLI equivalent of `POST /vending-machines/{id}/return-coin`: returns every
  * inserted coin and prints the coins handed back plus the reset balance.
  */
-#[AsCommand(name: 'app:vending-machine:return-coin', description: 'Returns every inserted coin and resets the balance.')]
+#[AsCommand(
+    name: 'app:vending-machine:return-coin',
+    description: 'Returns every inserted coin and resets the balance.',
+)]
 final class ReturnCoinCommand extends Command
 {
     use HandleTrait;

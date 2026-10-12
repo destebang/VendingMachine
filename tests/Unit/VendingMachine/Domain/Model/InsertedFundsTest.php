@@ -33,14 +33,11 @@ final class InsertedFundsTest extends TestCase
 
     public function test_equality_is_by_the_coins_held(): void
     {
-        self::assertTrue(
-            InsertedFunds::fromDenominations([25, 25])->equals(InsertedFunds::fromDenominations([25, 25])),
-        );
-        self::assertFalse(
-            InsertedFunds::fromDenominations([50])->equals(InsertedFunds::fromDenominations([25, 25])),
-        );
-        self::assertFalse(
-            InsertedFunds::fromDenominations([50])->equals(InsertedFunds::none()),
-        );
+        self::assertTrue(InsertedFunds::fromDenominations([25, 25])->equals(InsertedFunds::fromDenominations([
+            25,
+            25,
+        ])));
+        self::assertFalse(InsertedFunds::fromDenominations([50])->equals(InsertedFunds::fromDenominations([25, 25])));
+        self::assertFalse(InsertedFunds::fromDenominations([50])->equals(InsertedFunds::none()));
     }
 }

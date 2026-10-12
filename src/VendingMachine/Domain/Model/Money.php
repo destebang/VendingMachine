@@ -10,10 +10,10 @@ use App\VendingMachine\Domain\Exception\InvalidMoneyAmountException;
  * An immutable amount of money, always expressed in integer minor units
  * (cents), to avoid floating point arithmetic anywhere in the domain.
  */
-final class Money
+final readonly class Money
 {
     private function __construct(
-        private readonly int $amountInCents,
+        private int $amountInCents,
     ) {
         if ($this->amountInCents < 0) {
             throw InvalidMoneyAmountException::negativeAmount($this->amountInCents);

@@ -24,7 +24,10 @@ use Throwable;
  * CLI equivalent of `POST /vending-machines/{id}/selections`: selects a product,
  * prints the vended item and the change handed back, or the rejection reason.
  */
-#[AsCommand(name: 'app:vending-machine:select-item', description: 'Selects a product, vending it and returning any change.')]
+#[AsCommand(
+    name: 'app:vending-machine:select-item',
+    description: 'Selects a product, vending it and returning any change.',
+)]
 final class SelectItemCommand extends Command
 {
     use HandleTrait;

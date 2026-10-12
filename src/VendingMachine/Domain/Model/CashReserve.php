@@ -16,15 +16,14 @@ use App\VendingMachine\Domain\Exception\InvalidCashReserveException;
  * non-positive denomination or a negative quantity, and so "how much is in the
  * machine" has exactly one answer.
  */
-final class CashReserve
+final readonly class CashReserve
 {
     /**
      * @param array<int, int> $counts denomination in cents => number of units
      */
     private function __construct(
-        private readonly array $counts,
-    ) {
-    }
+        private array $counts,
+    ) {}
 
     public static function empty(): self
     {
@@ -166,12 +165,7 @@ final class CashReserve
         $mostWeCanTake = min($available[$denominationInCents] ?? 0, intdiv($remaining, $denominationInCents));
 
         for ($take = $mostWeCanTake; $take >= 0; $take--) {
-            $rest = self::search(
-                $denominations,
-                $available,
-                $index + 1,
-                $remaining - $take * $denominationInCents,
-            );
+            $rest = self::search($denominations, $available, $index + 1, $remaining - ($take * $denominationInCents));
 
             if ($rest !== null) {
                 if ($take > 0) {

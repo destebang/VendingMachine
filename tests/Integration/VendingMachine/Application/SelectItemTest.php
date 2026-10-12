@@ -69,16 +69,19 @@ final class SelectItemTest extends TestCase
         self::assertSame(0, $stored->state()->insertedFunds->amount()->amountInCents());
         self::assertSame([25 => 39, 10 => 39, 5 => 40], $stored->state()->cashReserve->counts());
 
-        self::assertSame([
-            'id' => $id,
-            'stock' => [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 9]],
-            'cashReserve' => [
-                ['denominationInCents' => 25, 'quantity' => 39],
-                ['denominationInCents' => 10, 'quantity' => 39],
-                ['denominationInCents' => 5, 'quantity' => 40],
+        self::assertSame(
+            [
+                'id' => $id,
+                'stock' => [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 9]],
+                'cashReserve' => [
+                    ['denominationInCents' => 25, 'quantity' => 39],
+                    ['denominationInCents' => 10, 'quantity' => 39],
+                    ['denominationInCents' => 5, 'quantity' => 40],
+                ],
+                'insertedFundsInCents' => 0,
             ],
-            'insertedFundsInCents' => 0,
-        ], $this->readModel->get($id));
+            $this->readModel->get($id),
+        );
     }
 
     public function test_an_insufficient_change_rejection_refunds_the_balance_in_both_stores(): void
@@ -96,8 +99,8 @@ final class SelectItemTest extends TestCase
         try {
             ($this->selectItem)(SelectItem::fromInput($id, 'WATER'));
             self::fail('Expected the selection to be rejected for insufficient change.');
-        } catch (InsufficientChangeAvailableException) {
-            // expected
+        } catch (InsufficientChangeAvailableException $exception) {
+            self::assertStringContainsString('change', $exception->getMessage());
         }
 
         $stored = $this->repository->find(VendingMachineId::fromString($id));
@@ -105,7 +108,11 @@ final class SelectItemTest extends TestCase
         self::assertNotNull($stored);
         self::assertSame(0, $stored->state()->insertedFunds->amount()->amountInCents());
         self::assertSame(10, $stored->state()->stock->quantityOf('WATER'));
-        self::assertSame(0, $this->readModel->get($id)['insertedFundsInCents']);
+
+        $projected = $this->readModel->get($id);
+
+        self::assertNotNull($projected);
+        self::assertSame(0, $projected['insertedFundsInCents']);
     }
 
     public function test_selecting_from_an_unknown_machine_is_rejected(): void

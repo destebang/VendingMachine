@@ -12,6 +12,5 @@ final class GetVendingMachineState
 {
     public function __construct(
         public readonly string $vendingMachineId,
-    ) {
-    }
+    ) {}
 }

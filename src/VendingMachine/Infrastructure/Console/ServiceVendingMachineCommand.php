@@ -22,7 +22,10 @@ use Symfony\Component\Messenger\MessageBusInterface;
  * CLI equivalent of `POST /vending-machines/{id}/service`: declares a machine's
  * true stock and cash reserve (replace semantics) and prints its state.
  */
-#[AsCommand(name: 'app:vending-machine:service', description: 'Sets a machine\'s stock and cash reserve (replace semantics).')]
+#[AsCommand(
+    name: 'app:vending-machine:service',
+    description: 'Sets a machine\'s stock and cash reserve (replace semantics).',
+)]
 final class ServiceVendingMachineCommand extends Command
 {
     use HandleTrait;
@@ -59,10 +62,14 @@ final class ServiceVendingMachineCommand extends Command
 
         try {
             /** @var list<array{selectorCode: string, priceInCents: int, stock: int}> $stock */
-            $stock = json_decode((string) $input->getOption('stock'), true, flags: JSON_THROW_ON_ERROR);
+            $stock = json_decode((string) $input->getOption('stock'), associative: true, flags: JSON_THROW_ON_ERROR);
 
             /** @var list<array{denominationInCents: int, quantity: int}> $cashReserve */
-            $cashReserve = json_decode((string) $input->getOption('cash-reserve'), true, flags: JSON_THROW_ON_ERROR);
+            $cashReserve = json_decode(
+                (string) $input->getOption('cash-reserve'),
+                associative: true,
+                flags: JSON_THROW_ON_ERROR,
+            );
 
             $command = ServiceVendingMachine::fromInput($id, $stock, $cashReserve);
         } catch (\Throwable $exception) {

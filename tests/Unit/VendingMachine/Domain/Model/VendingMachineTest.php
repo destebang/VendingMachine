@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\VendingMachine\Domain\Model;
 
+use App\VendingMachine\Domain\Exception\InvalidDenominationException;
 use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
 use App\VendingMachine\Domain\Model\CashReserve;
 use App\VendingMachine\Domain\Model\Denomination;
@@ -13,6 +14,7 @@ use App\VendingMachine\Domain\Model\Product;
 use App\VendingMachine\Domain\Model\Stock;
 use App\VendingMachine\Domain\Model\VendingMachine;
 use App\VendingMachine\Domain\Model\VendingMachineId;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class VendingMachineTest extends TestCase
@@ -72,7 +74,7 @@ final class VendingMachineTest extends TestCase
     public function test_service_is_rejected_while_a_transaction_is_pending(): void
     {
         $machine = VendingMachine::create(VendingMachineId::generate());
-        $machine->insertFunds(Money::fromCents(50));
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
 
         $this->expectException(PendingTransactionInProgressException::class);
 
@@ -106,13 +108,60 @@ final class VendingMachineTest extends TestCase
         }
     }
 
-    public function test_inserting_funds_is_recorded(): void
+    public function test_inserting_accepted_coins_accumulates(): void
     {
         $machine = VendingMachine::create(VendingMachineId::generate());
 
-        $machine->insertFunds(Money::fromCents(50));
-        $machine->insertFunds(Money::fromCents(25));
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+        $machine->insertCoin(Denomination::of(Money::fromCents(100)));
 
-        self::assertSame(75, $machine->state()->insertedFunds->amount()->amountInCents());
+        self::assertSame(150, $machine->state()->insertedFunds->amount()->amountInCents());
+    }
+
+    /**
+     * @param int $amountInCents
+     */
+    #[DataProvider('acceptedDenominations')]
+    public function test_every_accepted_denomination_is_recorded(int $amountInCents): void
+    {
+        $machine = VendingMachine::create(VendingMachineId::generate());
+
+        $machine->insertCoin(Denomination::of(Money::fromCents($amountInCents)));
+
+        self::assertSame($amountInCents, $machine->state()->insertedFunds->amount()->amountInCents());
+    }
+
+    /**
+     * @return iterable<string, array{int}>
+     */
+    public static function acceptedDenominations(): iterable
+    {
+        yield '5 cents' => [5];
+        yield '10 cents' => [10];
+        yield '25 cents' => [25];
+        yield '1 unit' => [100];
+    }
+
+    public function test_inserting_a_denomination_the_machine_does_not_accept_is_rejected(): void
+    {
+        $machine = VendingMachine::create(VendingMachineId::generate());
+
+        $this->expectException(InvalidDenominationException::class);
+
+        $machine->insertCoin(Denomination::of(Money::fromCents(50)));
+    }
+
+    public function test_a_rejected_denomination_leaves_the_balance_untouched(): void
+    {
+        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+
+        try {
+            $machine->insertCoin(Denomination::of(Money::fromCents(50)));
+            self::fail('Expected the inserted coin to be rejected.');
+        } catch (InvalidDenominationException) {
+            self::assertSame(25, $machine->state()->insertedFunds->amount()->amountInCents());
+        }
     }
 }

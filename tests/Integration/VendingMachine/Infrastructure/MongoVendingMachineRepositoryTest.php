@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\VendingMachine\Infrastructure;
 
 use App\Kernel\DocumentManagerFactory;
+use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
 use App\VendingMachine\Domain\Model\CashReserve;
 use App\VendingMachine\Domain\Model\InsertedFunds;
 use App\VendingMachine\Domain\Model\Money;
@@ -56,5 +57,26 @@ final class MongoVendingMachineRepositoryTest extends TestCase
         self::assertSame(4, $found->state()->stock->quantityOf('WATER'));
         self::assertSame(65, $found->state()->stock->products()['WATER']->price()->amountInCents());
         self::assertSame(7, $found->state()->stock->quantityOf('CHIPS'));
+    }
+
+    public function test_get_returns_the_stored_machine(): void
+    {
+        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $id = VendingMachineId::generate();
+
+        $repository->save(VendingMachine::create($id));
+
+        $found = $repository->get($id);
+
+        self::assertTrue($found->state()->id->equals($id));
+    }
+
+    public function test_get_fails_when_the_machine_does_not_exist(): void
+    {
+        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+
+        $this->expectException(VendingMachineNotFoundException::class);
+
+        $repository->get(VendingMachineId::generate());
     }
 }

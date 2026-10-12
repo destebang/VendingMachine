@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\VendingMachine\Infrastructure\Http\GetVendingMachineController;
 use App\VendingMachine\Infrastructure\Http\HealthCheckController;
+use App\VendingMachine\Infrastructure\Http\InsertCoinController;
 use App\VendingMachine\Infrastructure\Http\ProvisionVendingMachineController;
 use App\VendingMachine\Infrastructure\Http\ServiceVendingMachineController;
 use Symfony\Component\Routing\Route;
@@ -26,6 +27,12 @@ $routes->add('provision_vending_machine', new Route(
 $routes->add('service_vending_machine', new Route(
     path: '/vending-machines/{id}/service',
     defaults: ['_controller' => ServiceVendingMachineController::class],
+    methods: ['POST'],
+));
+
+$routes->add('insert_coin', new Route(
+    path: '/vending-machines/{id}/coins',
+    defaults: ['_controller' => InsertCoinController::class],
     methods: ['POST'],
 ));
 

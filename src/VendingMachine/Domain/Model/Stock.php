@@ -49,6 +49,11 @@ final class Stock
         return isset($this->products[$selectorCode]);
     }
 
+    public function product(string $selectorCode): ?Product
+    {
+        return $this->products[$selectorCode] ?? null;
+    }
+
     public function quantityOf(string $selectorCode): int
     {
         return ($this->products[$selectorCode] ?? null)?->stock() ?? 0;

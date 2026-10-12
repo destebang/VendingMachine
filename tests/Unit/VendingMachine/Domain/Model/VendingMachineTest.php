@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\VendingMachine\Domain\Model;
 
+use App\VendingMachine\Domain\Exception\InsufficientChangeAvailableException;
+use App\VendingMachine\Domain\Exception\InsufficientFundsException;
 use App\VendingMachine\Domain\Exception\InvalidDenominationException;
+use App\VendingMachine\Domain\Exception\OutOfStockException;
 use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
 use App\VendingMachine\Domain\Model\CashReserve;
 use App\VendingMachine\Domain\Model\Denomination;
@@ -163,5 +166,131 @@ final class VendingMachineTest extends TestCase
         } catch (InvalidDenominationException) {
             self::assertSame(25, $machine->state()->insertedFunds->amount()->amountInCents());
         }
+    }
+
+    public function test_selecting_a_product_with_exact_funds_vends_it_and_gives_no_change(): void
+    {
+        $machine = $this->stockedMachine();
+
+        $machine->insertCoin(Denomination::of(Money::fromCents(100)));
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+
+        $vendedItem = $machine->selectItem('SODA');
+        $state = $machine->state();
+
+        self::assertSame('SODA', $vendedItem->selectorCode);
+        self::assertSame(150, $vendedItem->price->amountInCents());
+        self::assertTrue($vendedItem->changeDue->isEmpty());
+        self::assertSame(9, $state->stock->quantityOf('SODA'));
+        self::assertSame([25 => 40, 10 => 40, 5 => 40], $state->cashReserve->counts());
+        self::assertSame(0, $state->insertedFunds->amount()->amountInCents());
+    }
+
+    public function test_change_is_made_from_the_reserve_largest_denomination_first(): void
+    {
+        $machine = $this->stockedMachine();
+
+        $machine->insertCoin(Denomination::of(Money::fromCents(100)));
+
+        $vendedItem = $machine->selectItem('WATER');
+        $state = $machine->state();
+
+        self::assertSame('WATER', $vendedItem->selectorCode);
+        self::assertSame(65, $vendedItem->price->amountInCents());
+        self::assertSame(35, $vendedItem->changeDue->total()->amountInCents());
+        self::assertSame([25, 10], $vendedItem->changeDue->denominationsInCents());
+        self::assertSame(9, $state->stock->quantityOf('WATER'));
+        self::assertSame([25 => 39, 10 => 39, 5 => 40], $state->cashReserve->counts());
+        self::assertSame(0, $state->insertedFunds->amount()->amountInCents());
+    }
+
+    public function test_selecting_with_insufficient_funds_is_rejected_and_keeps_the_balance(): void
+    {
+        $machine = $this->stockedMachine();
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+
+        try {
+            $machine->selectItem('WATER');
+            self::fail('Expected the selection to be rejected for insufficient funds.');
+        } catch (InsufficientFundsException) {
+            $state = $machine->state();
+
+            self::assertSame(25, $state->insertedFunds->amount()->amountInCents());
+            self::assertSame(10, $state->stock->quantityOf('WATER'));
+            self::assertSame([25 => 40, 10 => 40, 5 => 40], $state->cashReserve->counts());
+        }
+    }
+
+    public function test_selecting_an_out_of_stock_product_is_rejected_and_keeps_the_balance(): void
+    {
+        $machine = $this->stockedMachine(waterStock: 0);
+        $machine->insertCoin(Denomination::of(Money::fromCents(100)));
+
+        try {
+            $machine->selectItem('WATER');
+            self::fail('Expected the selection to be rejected as out of stock.');
+        } catch (OutOfStockException) {
+            $state = $machine->state();
+
+            self::assertSame(100, $state->insertedFunds->amount()->amountInCents());
+            self::assertSame(0, $state->stock->quantityOf('WATER'));
+        }
+    }
+
+    public function test_selecting_an_unstocked_selector_code_is_rejected_as_out_of_stock(): void
+    {
+        $machine = $this->stockedMachine();
+        $machine->insertCoin(Denomination::of(Money::fromCents(100)));
+
+        try {
+            $machine->selectItem('JUICE');
+            self::fail('Expected the selection of an unstocked selector code to be rejected.');
+        } catch (OutOfStockException) {
+            self::assertSame(100, $machine->state()->insertedFunds->amount()->amountInCents());
+        }
+    }
+
+    public function test_selecting_when_the_reserve_cannot_make_change_is_rejected_and_refunds(): void
+    {
+        // The customer's own coins (25 + 25 + 25 + 10 + 10 + 5) could make the 35
+        // cents of change, but change is only ever paid from the reserve, which is
+        // empty — so the sale is rejected and the whole 100 cents is handed back.
+        $machine = VendingMachine::reconstitute(
+            VendingMachineId::generate(),
+            InsertedFunds::none(),
+            Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
+            CashReserve::empty(),
+            0,
+        );
+
+        foreach ([25, 25, 25, 10, 10, 5] as $denominationInCents) {
+            $machine->insertCoin(Denomination::of(Money::fromCents($denominationInCents)));
+        }
+
+        try {
+            $machine->selectItem('WATER');
+            self::fail('Expected the selection to be rejected for insufficient change.');
+        } catch (InsufficientChangeAvailableException) {
+            $state = $machine->state();
+
+            self::assertSame(0, $state->insertedFunds->amount()->amountInCents());
+            self::assertSame(10, $state->stock->quantityOf('WATER'));
+            self::assertTrue($state->cashReserve->isEmpty());
+        }
+    }
+
+    private function stockedMachine(int $waterStock = 10): VendingMachine
+    {
+        return VendingMachine::reconstitute(
+            VendingMachineId::generate(),
+            InsertedFunds::none(),
+            Stock::fromProducts([
+                Product::create('WATER', Money::fromCents(65), $waterStock),
+                Product::create('SODA', Money::fromCents(150), 10),
+            ]),
+            CashReserve::fromCounts([25 => 40, 10 => 40, 5 => 40]),
+            0,
+        );
     }
 }

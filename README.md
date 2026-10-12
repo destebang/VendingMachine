@@ -4,14 +4,14 @@ A vending machine, built on standalone Symfony components (no
 `framework-bundle`), with a MongoDB-backed write model (Doctrine ODM) and a
 Redis-backed read model.
 
-**Current state: first customer-facing slice.** The whole stack boots
-end-to-end — HTTP, CLI, MongoDB, Redis, dependency injection, a Messenger
-command bus, and a three-layer test suite — and carries its first real use
-cases: provision a vending machine, service it (declare its true item stock and
-coin reserve), read its current state back, and insert coins toward the price of
-an item. The write side lives in MongoDB (Doctrine ODM), the read side in Redis,
-and the two are kept in step by the command handlers. A health check still
-round-trips data through both stores.
+**Current state: the full customer journey.** The whole stack boots end-to-end —
+HTTP, CLI, MongoDB, Redis, dependency injection, a Messenger command bus, and a
+three-layer test suite — and carries the customer-facing use cases: provision a
+vending machine, service it (declare its true item stock and coin reserve), read
+its current state back, insert coins toward the price of an item, and select a
+product to vend it and hand back any change due. The write side lives in MongoDB
+(Doctrine ODM), the read side in Redis, and the two are kept in step by the
+command handlers. A health check still round-trips data through both stores.
 
 ## Requirements
 
@@ -85,6 +85,22 @@ curl -s -X POST http://localhost:8000/vending-machines/$ID/coins \
 # -> {"id":"...","stock":[...],"cashReserve":[...],"insertedFundsInCents":25}
 ```
 
+Select a product: when the inserted funds cover its price, the machine vends it
+and returns any change due, made from its cash reserve (never from the coins just
+inserted), decrementing stock and reserve and resetting the balance:
+
+```bash
+curl -s -X POST http://localhost:8000/vending-machines/$ID/selections \
+  -H 'Content-Type: application/json' \
+  -d '{"selectorCode":"WATER"}'
+# -> {"id":"...","selectorCode":"WATER","priceInCents":65,"change":[25,10],"insertedFundsInCents":0}
+```
+
+A selection the machine cannot serve is rejected with a clear reason (HTTP 409):
+`InsufficientFunds` (the balance is kept so the customer can top up), `OutOfStock`
+(the balance is kept), or `InsufficientChangeAvailable` (the whole balance is
+returned).
+
 The same use cases are available through the CLI, dispatching the exact same
 commands through the same bus:
 
@@ -94,7 +110,20 @@ docker compose exec app php bin/console app:vending-machine:service $ID \
   --stock='[{"selectorCode":"WATER","priceInCents":65,"stock":10}]' \
   --cash-reserve='[{"denominationInCents":100,"quantity":5}]'
 docker compose exec app php bin/console app:vending-machine:insert-coin $ID --denomination-in-cents=25
+docker compose exec app php bin/console app:vending-machine:select-item $ID WATER
 docker compose exec app php bin/console app:vending-machine:show $ID
+```
+
+### Worked examples
+
+A machine serviced with `WATER` (0.65), `JUICE` (1.00) and `SODA` (1.50), and a
+change reserve of 40×0.25, 40×0.10 and 40×0.05, replays the specification's
+examples:
+
+```
+1, 0.25, 0.25, select SODA   -> SODA
+1, select WATER              -> WATER, 0.25, 0.10
+0.25, select WATER           -> InsufficientFunds (balance kept)
 ```
 
 ## Running the tests
@@ -114,18 +143,21 @@ docker compose exec -e MONGO_DB=vending_test -e REDIS_URL=redis://redis:6379/1 \
 ```
 
 * **Unit** (`tests/Unit`) — domain value objects and entities
-  (`Money`, `Denomination`, `Product`, `VendingMachine`), exercised in
-  isolation with no I/O, including the service replace semantics, the
-  mid-transaction rejection, and coin insertion (accepted denominations
-  accumulating, rejected ones leaving the balance untouched).
+  (`Money`, `Denomination`, `Product`, `ChangeDue`, `VendingMachine`),
+  exercised in isolation with no I/O, including the service replace semantics,
+  the mid-transaction rejection, coin insertion (accepted denominations
+  accumulating, rejected ones leaving the balance untouched), change-making
+  (largest denominations first, backtracking when a greedy choice cannot be
+  completed) and all four selection outcomes.
 * **Integration** (`tests/Integration`) — the MongoDB repository, the Redis
-  read-model repository and the provision/service/insert-coin use cases against
-  real instances.
+  read-model repository and the provision/service/insert-coin/select-item use
+  cases against real instances.
 * **Functional** (`tests/Functional`) — boots the real HTTP application and the
-  real CLI commands and exercises provisioning, servicing, inserting coins and
-  reading state (plus the mid-transaction and rejected-denomination cases)
-  through the full request/response (and input/output) cycle, Messenger bus
-  included.
+  real CLI commands and exercises provisioning, servicing, inserting coins,
+  reading state and selecting products (plus the mid-transaction,
+  rejected-denomination and rejected-selection cases) through the full
+  request/response (and input/output) cycle, Messenger bus included. The three
+  specification examples are replayed end-to-end.
 
 CI runs all three suites automatically on every push and pull request (see
 `.github/workflows/tests.yml`).
@@ -145,8 +177,8 @@ src/
 │                                # No business logic lives here.
 └── VendingMachine/
     ├── Domain/                 # Pure business logic. No framework, no I/O.
-    │   ├── Model/               # Money, Denomination, Product,
-    │   │                        # VendingMachineId, VendingMachine
+    │   ├── Model/               # Money, Denomination, Product, ChangeDue,
+    │   │                        # VendedItem, VendingMachineId, VendingMachine
     │   ├── Repository/          # VendingMachineRepository (port)
     │   └── Exception/
     ├── Application/            # Use cases: orchestrates the domain,
@@ -155,13 +187,14 @@ src/
     │   ├── ProvisionVendingMachine/  # Create a machine, seed the projection
     │   ├── ServiceVendingMachine/    # Service action: replace stock + cash reserve
     │   ├── InsertCoin/               # Customer inserts a coin; balance grows
+    │   ├── SelectItem/               # Customer selects a product; vend + change
     │   ├── GetVendingMachineState/   # Read-side query over the Redis projection
     │   └── ReadModel/           # Read-model port + MachineStateView
     └── Infrastructure/         # Adapters: the only place that knows about
         │                        # Mongo/Redis/HTTP/console.
         ├── Persistence/Mongo/   # Doctrine ODM document + repository
         ├── ReadModel/Redis/     # Redis-backed read model repository
-        ├── Http/                # HealthCheck + provision/service/insert-coin/get controllers
+        ├── Http/                # HealthCheck + provision/service/insert-coin/select/get controllers
         └── Console/             # HealthCheck + vending-machine commands
 ```
 
@@ -189,9 +222,10 @@ A single Symfony Messenger command bus (`config/services.yaml`,
 `command.bus`) is configured with a synchronous, in-memory
 `HandlersLocator`. Every use case is a command or query dispatched through it
 and handled by exactly one handler: `ProvisionVendingMachine`,
-`ServiceVendingMachine`, `InsertCoin`, the `GetVendingMachineState` query and
-the `HealthCheck` smoke test all go through it. The remaining vending-machine
-commands (select product, return coin) will follow the same shape.
+`ServiceVendingMachine`, `InsertCoin`, `SelectItem`, the
+`GetVendingMachineState` query and the `HealthCheck` smoke test all go through
+it. The remaining vending-machine command (return coin) will follow the same
+shape.
 
 ### MongoDB (write model) / Redis (read model)
 
@@ -203,7 +237,9 @@ for optimistic concurrency. The Redis read model
 machine and is reachable only through the `VendingMachineStateReadModelRepository`
 port. Both write commands project a `MachineStateView` into it (provisioning
 seeds it, servicing replaces it), and `GetVendingMachineState` serves reads
-straight from it without touching the write side.
+straight from it without touching the write side. `SelectItem` refreshes it for
+every outcome, because a rejected selection can still change the machine — an
+exact-change refund resets the balance.
 
 ## Extending it
 
@@ -235,7 +271,16 @@ straight from it without touching the write side.
   aggregate (`ACCEPTED_DENOMINATIONS_IN_CENTS`) rather than being configurable
   per machine. Fine while every machine takes the same coins; a per-machine set
   would move onto the aggregate and into the Mongo document.
-* There is still no use case for selecting a product or returning change, so
-  inserted funds can only grow — nothing spends or refunds them yet. The
-  aggregate already guards servicing mid-transaction, and `InsertCoin` is the
-  first driving adapter that grows the balance.
+* Inserted funds are modelled as a running total (`InsertedFunds`), which is all
+  a selection needs. "Return coin" (#5) must hand back the *literal* coins the
+  customer put in, so that use case will grow `InsertedFunds` into a collection
+  of the individual denominations inserted.
+* Change is made from the cash reserve with a bounded backtracking search over
+  the denominations the machine actually holds. There is no cap on which
+  denomination can be given back, so a reserve holding 1-unit coins would return
+  them as change; the specification's "1 coins are never recirculated" rule would
+  be a small, explicit filter on the search if it were wanted.
+* A rejected selection is persisted and projected like a successful one, so the
+  projection always reflects the balance after the attempt. That costs a
+  no-op write on `InsufficientFunds` and `OutOfStock`, where the machine's state
+  does not actually change.

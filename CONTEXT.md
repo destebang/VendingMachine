@@ -44,6 +44,17 @@ The state in which a machine holds inserted funds and the purchase has not yet
 settled.
 _Avoid_: open sale, incomplete order, in-flight cart
 
+**Selection**:
+A customer choosing a loaded product to buy with the funds already inserted.
+Settles the pending transaction: the product is vended, any change due is paid
+from the cash reserve, and the inserted funds are reset.
+_Avoid_: purchase, buy, order, sale
+
+**Vended item**:
+The product a machine hands over on a successful selection, together with the
+change due.
+_Avoid_: dispensed item, product out, output
+
 **Service**:
 A technician declaring a machine's true stock and cash reserve, replacing
 whatever was there. Rejected while a transaction is pending.

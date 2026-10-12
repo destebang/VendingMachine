@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\VendingMachine\Domain\Model;
 
-use App\VendingMachine\Domain\Exception\InsufficientStockException;
+use App\VendingMachine\Domain\Exception\OutOfStockException;
 use App\VendingMachine\Domain\Model\Money;
 use App\VendingMachine\Domain\Model\Product;
 use PHPUnit\Framework\TestCase;
@@ -25,7 +25,7 @@ final class ProductTest extends TestCase
     {
         $product = Product::create('WATER', Money::fromCents(65), stock: 0);
 
-        $this->expectException(InsufficientStockException::class);
+        $this->expectException(OutOfStockException::class);
 
         $product->decreaseStock();
     }

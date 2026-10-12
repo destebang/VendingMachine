@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Infrastructure\Persistence\Mongo;
 
+use App\Shared\Infrastructure\EventBus\DomainEventCollector;
 use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
 use App\VendingMachine\Domain\Model\CashReserve;
 use App\VendingMachine\Domain\Model\InsertedFunds;
@@ -19,11 +20,16 @@ use Doctrine\ODM\MongoDB\DocumentManager;
  * MongoDB-backed implementation of the write-side repository, via Doctrine
  * ODM. Translates between the persistence-agnostic `VendingMachine`
  * aggregate and the Mongo-specific `VendingMachineDocument`.
+ *
+ * After a successful flush it drains the aggregate's recorded domain events
+ * into the per-request `DomainEventCollector`, which the command-bus middleware
+ * publishes once the command is done.
  */
 final class MongoVendingMachineRepository implements VendingMachineRepository
 {
     public function __construct(
         private readonly DocumentManager $documentManager,
+        private readonly DomainEventCollector $domainEventCollector,
     ) {}
 
     public function find(VendingMachineId $id): ?VendingMachine
@@ -64,6 +70,8 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
         $document->cashReserve = self::cashReserveToDocument($state->cashReserve->counts());
 
         $this->documentManager->flush();
+
+        $this->domainEventCollector->collect(...$vendingMachine->releaseEvents());
     }
 
     /**

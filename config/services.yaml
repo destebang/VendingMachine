@@ -1,3 +1,8 @@
+parameters:
+    # Middleware Symfony's MessengerPass assembles the command bus from.
+    command.bus.middleware:
+        - { id: command.bus.middleware.handle_message }
+
 services:
     _defaults:
         autowire: true
@@ -9,6 +14,7 @@ services:
         exclude:
             - '../src/Kernel'
             - '../src/Shared/Domain'
+            - '../src/Shared/Application'
             - '../src/VendingMachine/Domain/Model'
             - '../src/VendingMachine/Domain/Event'
             - '../src/VendingMachine/Domain/Exception'
@@ -37,33 +43,23 @@ services:
         factory: ['App\Kernel\RedisClientFactory', 'create']
 
     # --- Command bus (Messenger, sync, in-memory) ---------------------------
+    # Handlers self-register: `#[CommandHandler]`/`#[QueryHandler]` services are
+    # autoconfigured onto this bus, and Symfony's MessengerPass builds the bus
+    # and its handlers locator from those tags. No hand-written message→handler
+    # map lives here.
     Symfony\Component\Messenger\MessageBusInterface: '@command.bus'
 
     command.bus:
         class: Symfony\Component\Messenger\MessageBus
+        tags: [messenger.bus]
+        # Replaced by MessengerPass with the middleware list from the
+        # `command.bus.middleware` parameter.
         arguments:
-            - ['@command_bus.handle_message_middleware']
+            - []
 
-    command_bus.handle_message_middleware:
+    command.bus.middleware.handle_message:
         class: Symfony\Component\Messenger\Middleware\HandleMessageMiddleware
+        # Replaced by MessengerPass with the generated handlers locator.
         arguments:
-            - '@command_bus.handlers_locator'
+            - []
 
-    command_bus.handlers_locator:
-        class: Symfony\Component\Messenger\Handler\HandlersLocator
-        arguments:
-            -
-                App\VendingMachine\Application\HealthCheck\HealthCheck:
-                    - '@App\VendingMachine\Application\HealthCheck\HealthCheckHandler'
-                App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachine:
-                    - '@App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachineHandler'
-                App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachine:
-                    - '@App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachineHandler'
-                App\VendingMachine\Application\InsertCoin\InsertCoin:
-                    - '@App\VendingMachine\Application\InsertCoin\InsertCoinHandler'
-                App\VendingMachine\Application\SelectItem\SelectItem:
-                    - '@App\VendingMachine\Application\SelectItem\SelectItemHandler'
-                App\VendingMachine\Application\ReturnCoin\ReturnCoin:
-                    - '@App\VendingMachine\Application\ReturnCoin\ReturnCoinHandler'
-                App\VendingMachine\Application\GetVendingMachineState\GetVendingMachineState:
-                    - '@App\VendingMachine\Application\GetVendingMachineState\GetVendingMachineStateHandler'

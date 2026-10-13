@@ -234,7 +234,8 @@ src/
 │                                # HTTP front controller, infra factories.
 │                                # No business logic lives here.
 ├── Shared/                     # Cross-aggregate, framework-free building blocks
-│   └── Domain/Event/           # DomainEvent + DomainEventBus contracts
+│   ├── Domain/Event/           # DomainEvent + DomainEventBus contracts
+│   └── Application/Bus/        # CommandHandler/QueryHandler markers
 └── VendingMachine/
     ├── Domain/                 # Pure business logic. No framework, no I/O.
     │   ├── Model/               # Money, Denomination, Product, ChangeDue,
@@ -281,12 +282,18 @@ identical service wiring.
 ### CQRS-shaped from day one
 
 A single Symfony Messenger command bus (`config/services.yaml`,
-`command.bus`) is configured with a synchronous, in-memory
-`HandlersLocator`. Every use case is a command or query dispatched through it
-and handled by exactly one handler: `ProvisionVendingMachine`,
-`ServiceVendingMachine`, `InsertCoin`, `SelectItem`, `ReturnCoin`, the
-`GetVendingMachineState` query and the `HealthCheck` smoke test all go through
-it.
+`command.bus`) is configured with a synchronous, in-memory handlers locator.
+Every use case is a command or query dispatched through it and handled by
+exactly one handler: `ProvisionVendingMachine`, `ServiceVendingMachine`,
+`InsertCoin`, `SelectItem`, `ReturnCoin`, the `GetVendingMachineState` query and
+the `HealthCheck` smoke test all go through it.
+
+Handlers self-register: a handler class marked `#[CommandHandler]` (or
+`#[QueryHandler]`) is autoconfigured onto the bus by `App\Kernel\ContainerFactory`,
+so adding a use case is adding the handler class — no hand-written
+message→handler map. Symfony's own `MessengerPass` builds the bus and its
+handlers locator from those tags, and a compiler pass refuses to compile when a
+command or query ends up with zero handlers or more than one.
 
 ### Domain events (write-side foundation)
 
@@ -319,9 +326,9 @@ balance.
 
 ## Extending it
 
-* **New use case** — add a command/handler pair under `Application/`,
-  register it in `command_bus.handlers_locator` (services.yaml), and add a
-  driving adapter (an HTTP route + controller, and/or a console command)
+* **New use case** — add a command/handler pair under `Application/`, mark the
+  handler `#[CommandHandler]` (or `#[QueryHandler]`) so it self-registers, and
+  add a driving adapter (an HTTP route + controller, and/or a console command)
   that dispatches it through the bus.
 * **New product, coin, or business rule** — products stay generic
   (`Product`/`Denomination` value objects); a machine is stocked by declaring

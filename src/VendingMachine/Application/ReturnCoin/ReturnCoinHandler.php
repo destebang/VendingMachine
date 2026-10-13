@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Application\ReturnCoin;
 
+use App\Shared\Application\Bus\Attribute\CommandHandler;
 use App\VendingMachine\Application\ReadModel\MachineStateView;
 use App\VendingMachine\Application\ReadModel\VendingMachineStateReadModelRepository;
 use App\VendingMachine\Domain\Repository\VendingMachineRepository;
@@ -17,6 +18,7 @@ use App\VendingMachine\Domain\Repository\VendingMachineRepository;
  * reflects the (reset) balance. A missing machine surfaces as
  * `VendingMachineNotFoundException` before any of this runs.
  */
+#[CommandHandler]
 final class ReturnCoinHandler
 {
     public function __construct(

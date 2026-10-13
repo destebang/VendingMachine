@@ -141,3 +141,16 @@ target = "class"
 must-be-final = true
 must-be-named = "*Exception"
 reason = "Domain exceptions must be final and named *Exception."
+
+[[guard.structural.rules]]
+on = "App\\Shared\\Application\\Bus\\**"
+target = "interface"
+must-be-named = "*Bus"
+reason = "Bus ports must be named *Bus."
+
+[[guard.structural.rules]]
+on = "App\\Kernel\\Bus\\**"
+target = "class"
+must-be-final = true
+must-be-named = "*Bus"
+reason = "Bus adapters must be final and named *Bus."

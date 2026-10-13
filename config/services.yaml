@@ -1,7 +1,9 @@
 parameters:
-    # Middleware Symfony's MessengerPass assembles the command bus from.
+    # Middleware Symfony's MessengerPass assembles each bus from.
     command.bus.middleware:
         - { id: command.bus.middleware.handle_message }
+    query.bus.middleware:
+        - { id: query.bus.middleware.handle_message }
 
 services:
     _defaults:
@@ -58,6 +60,31 @@ services:
             - []
 
     command.bus.middleware.handle_message:
+        class: Symfony\Component\Messenger\Middleware\HandleMessageMiddleware
+        # Replaced by MessengerPass with the generated handlers locator.
+        arguments:
+            - []
+
+    # --- Query bus (Messenger, sync, in-memory) -----------------------------
+    # The read side rides its own bus: `#[QueryHandler]` services are
+    # autoconfigured onto it, and the `QueryBus` port is the only thing the
+    # driving adapters see.
+    App\Shared\Application\Bus\QueryBus:
+        alias: App\Kernel\Bus\MessengerQueryBus
+
+    App\Kernel\Bus\MessengerQueryBus:
+        arguments:
+            $queryBus: '@query.bus'
+
+    query.bus:
+        class: Symfony\Component\Messenger\MessageBus
+        tags: [messenger.bus]
+        # Replaced by MessengerPass with the middleware list from the
+        # `query.bus.middleware` parameter.
+        arguments:
+            - []
+
+    query.bus.middleware.handle_message:
         class: Symfony\Component\Messenger\Middleware\HandleMessageMiddleware
         # Replaced by MessengerPass with the generated handlers locator.
         arguments:

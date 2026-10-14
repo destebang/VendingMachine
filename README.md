@@ -713,6 +713,27 @@ get → domain call → save.
   (console) with no consistent error envelope. A small, centralised mapper (or
   a Symfony exception listener on the HTTP side) would remove the duplication
   and the risk of the two adapters drifting out of sync.
+* There is no authentication or authorization on any HTTP endpoint —
+  provisioning, servicing, inserting coins and selecting items are all open
+  POSTs, and the infrastructure runs on its images' defaults (RabbitMQ's
+  `guest/guest`, no Mongo/Redis auth, no TLS anywhere in `docker-compose.yml`).
+  Fine for a local demo; an API-key or JWT boundary in front of the HTTP
+  adapter is the first thing a real deployment would add.
+* `insert-coin` and `select-item` are plain POSTs with no idempotency key,
+  unlike the consuming side: the Sales context's unique index on
+  `sourceEventId` makes a redelivered integration event a silent no-op, but a
+  retried HTTP request (client timeout, proxy retry, double-tap) has no
+  equivalent protection and can double-insert a coin or attempt a double vend.
+  A concurrent write collision on the same machine (Doctrine's optimistic-lock
+  conflict) is not mapped to a client-retryable response either; it surfaces
+  as a raw 500 rather than a 409 the caller could safely retry.
+* Observability is minimal: the only logging is a single
+  `LoggerInterface->error()` call when a domain-event subscriber fails
+  (`MessengerDomainEventBus`), there are no metrics (outbox backlog size,
+  relay lag, consumer lag), and tracing is just reusing the causing domain
+  event's id as `correlationId`. `/health` reports a binary up/down with no
+  deeper signal. Enough to demonstrate the patterns; not enough to see an
+  at-least-once retry storm or a growing DLQ without reading logs by hand.
 * The read-model port still speaks a raw state array; `MachineStateView` is the
   typed projection on top of it. Folding the DTO into the port signature is a
   natural next step once a second projection shape exists.
@@ -735,6 +756,12 @@ get → domain call → save.
   projection always reflects the balance after the attempt. That costs a
   no-op write on `InsufficientFunds` and `OutOfStock`, where the machine's state
   does not actually change.
+* The write model persists current state only (`VendingMachineDocument`),
+  with `pendingEvents` as a transient outbox array that's `$pull`ed once
+  published. Once drained, there is no durable log of what happened to a
+  machine — no replay, no audit trail, no event-sourced rebuild. State-based
+  persistence was the deliberate choice here; event sourcing is a different,
+  bigger trade-off this codebase didn't take on.
 * Integration event delivery is at-least-once: a relay crash between the
   broker's confirm and the outbox removal (or a lost race with a concurrent
   save) republishes a message, so consumers must deduplicate on the envelope
@@ -747,6 +774,20 @@ get → domain call → save.
 * Published messages accumulate in `vending-machine.integration` until the
   consuming slice lands — visible in the management UI, harmless at this
   scale, and worth a queue policy (or actual consumers) before real traffic.
+* Every piece of infrastructure — Mongo, Redis, RabbitMQ, `outbox-relay`,
+  `sales-worker` — runs as a single replica in `docker-compose.yml`; none of
+  it is highly available. The standalone Mongo node is already explained above
+  (change streams need a replica set), but the same single-node shape applies
+  to the broker and both workers, and running two `outbox-relay` replicas
+  today would just mean both polling and racing to publish the same pending
+  entries — harmless, because delivery is already at-least-once, but not a
+  scaling strategy.
+* Mongo indexes (e.g. the unique index on `Sale.sourceEventId`) are ensured
+  lazily, in-process, on first use (`MongoSaleRepository::ensureIndexes()`),
+  rather than through a migration step run once at deploy time; several
+  cold-starting processes would race to create the same index. `GET /sales`
+  also returns every row unpaginated — fine at demo volume, would need
+  cursor-based pagination before real traffic.
 * Two Mago rules are tuned in `mago.toml`: `too-many-methods` is raised and
   skips tests (test classes grow one method per case), and
   `inline-variable-return` is off because its fixer strips the `@var` that

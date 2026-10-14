@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Infrastructure\Console;
 
+use App\Shared\Application\Bus\CommandBus;
 use App\VendingMachine\Application\InsertCoin\InsertCoin;
 use App\VendingMachine\Application\InsertCoin\InsertCoinResult;
 use App\VendingMachine\Domain\Exception\InvalidDenominationException;
@@ -14,9 +15,6 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Messenger\Exception\HandlerFailedException;
-use Symfony\Component\Messenger\HandleTrait;
-use Symfony\Component\Messenger\MessageBusInterface;
 use Throwable;
 
 /**
@@ -30,13 +28,10 @@ use Throwable;
 )]
 final class InsertCoinCommand extends Command
 {
-    use HandleTrait;
-
-    public function __construct(MessageBusInterface $messageBus)
-    {
+    public function __construct(
+        private readonly CommandBus $commandBus,
+    ) {
         parent::__construct();
-
-        $this->messageBus = $messageBus;
     }
 
     protected function configure(): void
@@ -67,29 +62,21 @@ final class InsertCoinCommand extends Command
 
         try {
             /** @var InsertCoinResult $result */
-            $result = $this->handle($command);
-        } catch (HandlerFailedException $transportException) {
-            $cause = $transportException->getPrevious() ?? $transportException;
+            $result = $this->commandBus->handle($command);
+        } catch (InvalidDenominationException $exception) {
+            $output->writeln(json_encode([
+                'error' => 'InvalidDenomination',
+                'message' => $exception->getMessage(),
+            ], JSON_THROW_ON_ERROR));
 
-            if ($cause instanceof InvalidDenominationException) {
-                $output->writeln(json_encode([
-                    'error' => 'InvalidDenomination',
-                    'message' => $cause->getMessage(),
-                ], JSON_THROW_ON_ERROR));
+            return Command::FAILURE;
+        } catch (VendingMachineNotFoundException $exception) {
+            $output->writeln(json_encode([
+                'error' => 'VendingMachineNotFound',
+                'message' => $exception->getMessage(),
+            ], JSON_THROW_ON_ERROR));
 
-                return Command::FAILURE;
-            }
-
-            if ($cause instanceof VendingMachineNotFoundException) {
-                $output->writeln(json_encode([
-                    'error' => 'VendingMachineNotFound',
-                    'message' => $cause->getMessage(),
-                ], JSON_THROW_ON_ERROR));
-
-                return Command::FAILURE;
-            }
-
-            throw $transportException;
+            return Command::FAILURE;
         }
 
         $output->writeln(json_encode($result->state->toArray(), JSON_THROW_ON_ERROR));

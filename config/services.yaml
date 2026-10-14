@@ -51,6 +51,15 @@ services:
     # map lives here.
     Symfony\Component\Messenger\MessageBusInterface: '@command.bus'
 
+    # The write-side driving adapters depend on the framework-free port; the
+    # Kernel adapter is the only place that knows Messenger.
+    App\Shared\Application\Bus\CommandBus:
+        alias: App\Kernel\Bus\MessengerCommandBus
+
+    App\Kernel\Bus\MessengerCommandBus:
+        arguments:
+            $commandBus: '@command.bus'
+
     command.bus:
         class: Symfony\Component\Messenger\MessageBus
         tags: [messenger.bus]

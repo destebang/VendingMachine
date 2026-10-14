@@ -233,10 +233,10 @@ src/
 ├── Kernel/                     # Hand-assembled bootstrap: DI container,
 │   │                            # HTTP front controller, infra factories.
 │   │                            # No business logic lives here.
-│   └── Bus/                     # MessengerQueryBus: the QueryBus adapter
+│   └── Bus/                     # MessengerCommandBus / MessengerQueryBus adapters
 ├── Shared/                     # Cross-aggregate, framework-free building blocks
 │   ├── Domain/Event/           # DomainEvent + DomainEventBus contracts
-│   └── Application/Bus/        # CommandHandler/QueryHandler markers + QueryBus port
+│   └── Application/Bus/        # CommandHandler/QueryHandler markers + CommandBus/QueryBus ports
 └── VendingMachine/
     ├── Domain/                 # Pure business logic. No framework, no I/O.
     │   ├── Model/               # Money, Denomination, Product, ChangeDue,
@@ -296,10 +296,13 @@ handler class — no hand-written message→handler map. Symfony's own
 compiler pass refuses to compile when a command or query ends up with zero
 handlers or more than one.
 
-The read-side driving adapters (`GetVendingMachineController`,
-`GetVendingMachineCommand`) depend on the framework-free `QueryBus` port
-(`ask(object $query): mixed`), not on Messenger; only the
-`App\Kernel\Bus\MessengerQueryBus` adapter knows the framework.
+The driving adapters depend on framework-free ports, not on Messenger: the
+read side (`GetVendingMachineController`, `GetVendingMachineCommand`) asks
+through `QueryBus` (`ask(object $query): mixed`) and the write side (every
+`*Controller` and `*Command`) handles through `CommandBus`
+(`handle(object $command): mixed`). Only the `App\Kernel\Bus\Messenger*Bus`
+adapters know the framework; the command adapter also unwraps Messenger's
+`HandlerFailedException`, so the adapters catch domain exceptions directly.
 
 ### Domain events (write-side foundation)
 
@@ -340,8 +343,8 @@ balance.
   (`Product`/`Denomination` value objects); a machine is stocked by declaring
   concrete rows, never by hardcoding a catalogue. New rules belong on the
   `VendingMachine` aggregate and are rejected with a domain exception.
-* **New channel** — add a new adapter under `Infrastructure/` that
-  dispatches existing commands through `command.bus` (or queries through the
+* **New channel** — add a new adapter under `Infrastructure/` that handles
+  existing commands through the `CommandBus` port (or asks queries through the
   `QueryBus` port). The HTTP controller and console command are the template: no
   business logic, only translating input/output.
 

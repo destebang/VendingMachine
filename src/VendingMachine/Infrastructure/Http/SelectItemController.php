@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Infrastructure\Http;
 
+use App\Shared\Application\Bus\CommandBus;
 use App\VendingMachine\Application\SelectItem\SelectItem;
 use App\VendingMachine\Application\SelectItem\SelectItemResult;
 use App\VendingMachine\Domain\Exception\InsufficientChangeAvailableException;
@@ -12,9 +13,6 @@ use App\VendingMachine\Domain\Exception\OutOfStockException;
 use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\Messenger\Exception\HandlerFailedException;
-use Symfony\Component\Messenger\HandleTrait;
-use Symfony\Component\Messenger\MessageBusInterface;
 use Throwable;
 
 /**
@@ -25,12 +23,9 @@ use Throwable;
  */
 final class SelectItemController
 {
-    use HandleTrait;
-
-    public function __construct(MessageBusInterface $messageBus)
-    {
-        $this->messageBus = $messageBus;
-    }
+    public function __construct(
+        private readonly CommandBus $commandBus,
+    ) {}
 
     public function __invoke(Request $request, string $id): JsonResponse
     {
@@ -48,39 +43,28 @@ final class SelectItemController
 
         try {
             /** @var SelectItemResult $result */
-            $result = $this->handle($command);
-        } catch (HandlerFailedException $transportException) {
-            return $this->errorResponse($transportException);
+            $result = $this->commandBus->handle($command);
+        } catch (InsufficientFundsException $exception) {
+            return $this->rejection('InsufficientFunds', $exception);
+        } catch (OutOfStockException $exception) {
+            return $this->rejection('OutOfStock', $exception);
+        } catch (InsufficientChangeAvailableException $exception) {
+            return $this->rejection('InsufficientChangeAvailable', $exception);
+        } catch (VendingMachineNotFoundException $exception) {
+            return new JsonResponse([
+                'error' => 'VendingMachineNotFound',
+                'message' => $exception->getMessage(),
+            ], JsonResponse::HTTP_NOT_FOUND);
         }
 
         return new JsonResponse($result->toArray());
     }
 
-    private function errorResponse(HandlerFailedException $transportException): JsonResponse
+    private function rejection(string $error, Throwable $exception): JsonResponse
     {
-        $cause = $transportException->getPrevious() ?? $transportException;
-
-        $error = match (true) {
-            $cause instanceof InsufficientFundsException => 'InsufficientFunds',
-            $cause instanceof OutOfStockException => 'OutOfStock',
-            $cause instanceof InsufficientChangeAvailableException => 'InsufficientChangeAvailable',
-            default => null,
-        };
-
-        if ($error !== null) {
-            return new JsonResponse([
-                'error' => $error,
-                'message' => $cause->getMessage(),
-            ], JsonResponse::HTTP_CONFLICT);
-        }
-
-        if ($cause instanceof VendingMachineNotFoundException) {
-            return new JsonResponse([
-                'error' => 'VendingMachineNotFound',
-                'message' => $cause->getMessage(),
-            ], JsonResponse::HTTP_NOT_FOUND);
-        }
-
-        throw $transportException;
+        return new JsonResponse([
+            'error' => $error,
+            'message' => $exception->getMessage(),
+        ], JsonResponse::HTTP_CONFLICT);
     }
 }

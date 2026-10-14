@@ -77,10 +77,9 @@ final class VendingMachine
             CashReserve::empty(),
             0,
         );
-        $vendingMachine->record(static fn(VendingMachineState $state): VendingMachineProvisioned => new VendingMachineProvisioned(
-            $id,
-            $state,
-        ));
+        $vendingMachine->record(
+            static fn(): VendingMachineProvisioned => new VendingMachineProvisioned($id, $vendingMachine->state()),
+        );
 
         return $vendingMachine;
     }
@@ -135,7 +134,7 @@ final class VendingMachine
 
         $this->insertedFunds = $this->insertedFunds->plus($coin);
 
-        $this->record(fn(VendingMachineState $state): CoinInserted => new CoinInserted($this->id, $state, $coin));
+        $this->record(fn(): CoinInserted => new CoinInserted($this->id, $this->state(), $coin));
     }
 
     /**
@@ -153,11 +152,7 @@ final class VendingMachine
         $this->insertedFunds = InsertedFunds::none();
 
         $this->record(
-            fn(VendingMachineState $state): InsertedFundsReturned => new InsertedFundsReturned(
-                $this->id,
-                $state,
-                $returnedFunds,
-            ),
+            fn(): InsertedFundsReturned => new InsertedFundsReturned($this->id, $this->state(), $returnedFunds),
         );
 
         return $returnedFunds;
@@ -212,9 +207,9 @@ final class VendingMachine
             $this->insertedFunds = InsertedFunds::none();
 
             $this->record(
-                fn(VendingMachineState $state): InsertedFundsReturnedDueToInsufficientChange => new InsertedFundsReturnedDueToInsufficientChange(
+                fn(): InsertedFundsReturnedDueToInsufficientChange => new InsertedFundsReturnedDueToInsufficientChange(
                     $this->id,
-                    $state,
+                    $this->state(),
                     $returnedFunds,
                     $selectorCode,
                 ),
@@ -230,7 +225,7 @@ final class VendingMachine
         $this->insertedFunds = InsertedFunds::none();
 
         $vendedItem = new VendedItem($selectorCode, $price, $change);
-        $this->record(fn(VendingMachineState $state): ItemVended => new ItemVended($this->id, $state, $vendedItem));
+        $this->record(fn(): ItemVended => new ItemVended($this->id, $this->state(), $vendedItem));
 
         return $vendedItem;
     }
@@ -255,9 +250,7 @@ final class VendingMachine
         $this->cashReserve = $cashReserve;
         $this->acceptedDenominations = $acceptedDenominations;
 
-        $this->record(
-            fn(VendingMachineState $state): VendingMachineServiced => new VendingMachineServiced($this->id, $state),
-        );
+        $this->record(fn(): VendingMachineServiced => new VendingMachineServiced($this->id, $this->state()));
     }
 
     /**
@@ -287,18 +280,17 @@ final class VendingMachine
 
     /**
      * Records a domain event for the mutation just applied. Recording and the
-     * version advance are one act: the version is bumped first, then the
-     * factory builds the event from the state captured after the bump — so
-     * every event names the version the machine was left at, and the bump
-     * cannot be forgotten. One recorded mutation per flush keeps the aggregate
-     * in step with the version the persistence layer manages for optimistic
-     * locking.
+     * version advance are one act: the version is bumped first, and the factory
+     * builds the event only then — so the event's snapshot carries the version
+     * the machine was left at, and the bump cannot be forgotten. One recorded
+     * mutation per flush keeps the aggregate in step with the version the
+     * persistence layer manages for optimistic locking.
      *
-     * @param callable(VendingMachineState): VendingMachineEvent $eventFactory
+     * @param callable(): VendingMachineEvent $eventFactory
      */
     private function record(callable $eventFactory): void
     {
         $this->version++;
-        $this->recordedEvents[] = $eventFactory($this->state());
+        $this->recordedEvents[] = $eventFactory();
     }
 }

@@ -13,14 +13,25 @@ use Symfony\Component\DependencyInjection\ContainerBuilder;
  * one handler.
  *
  * Handlers are discovered from the `messenger.message_handler` tag the
- * `#[CommandHandler]`/`#[QueryHandler]` attributes add. The messages that
- * *should* be handled come from the use-case classes themselves, so a use case
- * with no handler at all fails too — something the Messenger handler locator
- * alone cannot see.
+ * `#[CommandHandler]`/`#[QueryHandler]` attributes add. Tags bound to another
+ * bus — the `domain_event.bus` subscribers marked `#[DomainEventSubscriber]` —
+ * are ignored on purpose: an event may have any number of subscribers, while a
+ * command or query must have exactly one handler. The messages that *should*
+ * be handled come from the use-case classes themselves, so a use case with no
+ * handler at all fails too — something the Messenger handler locator alone
+ * cannot see.
  */
 final class SingleHandlerPerMessagePass implements CompilerPassInterface
 {
     private const string HANDLER_TAG = 'messenger.message_handler';
+
+    /**
+     * The buses whose messages must have exactly one handler. A tag without a
+     * `bus` attribute is registered on every bus by Messenger, so it counts.
+     *
+     * @var list<string>
+     */
+    private const array SINGLE_HANDLER_BUSES = ['command.bus', 'query.bus'];
 
     /**
      * @param string $applicationNamespace prefix of the use-case classes to inspect
@@ -44,9 +55,21 @@ final class SingleHandlerPerMessagePass implements CompilerPassInterface
     {
         $handlersByMessage = [];
 
-        foreach ($container->findTaggedServiceIds(self::HANDLER_TAG) as $serviceId => $tags) {
-            foreach (HandlerMessages::of($container, $serviceId) as $message) {
-                $handlersByMessage[$message][] = $serviceId;
+        /** @var array<string, list<array<string, mixed>>> $taggedServices */
+        $taggedServices = $container->findTaggedServiceIds(self::HANDLER_TAG);
+
+        foreach ($taggedServices as $serviceId => $tags) {
+            foreach ($tags as $tag) {
+                /** @var string|null $bus */
+                $bus = $tag['bus'] ?? null;
+
+                if ($bus !== null && !in_array($bus, self::SINGLE_HANDLER_BUSES, strict: true)) {
+                    continue;
+                }
+
+                foreach (HandlerMessages::of($container, $serviceId) as $message) {
+                    $handlersByMessage[$message][] = $serviceId;
+                }
             }
         }
 

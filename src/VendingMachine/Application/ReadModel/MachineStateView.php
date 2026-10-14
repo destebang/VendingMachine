@@ -6,14 +6,15 @@ namespace App\VendingMachine\Application\ReadModel;
 
 use App\VendingMachine\Domain\Model\Product;
 use App\VendingMachine\Domain\Model\VendingMachine;
+use App\VendingMachine\Domain\Model\VendingMachineState;
 
 /**
  * Read-side projection of a single vending machine: the flat, serialisable
  * shape stored in the Redis read model and served by the query side.
  *
  * It is deliberately decoupled from the write-side aggregate, but built from
- * it (and rebuilt from stored state) in exactly one place so the projection
- * shape never leaks into the handlers.
+ * its state snapshot (and rebuilt from stored state) in exactly one place so
+ * the projection shape never leaks into the handlers.
  */
 final class MachineStateView
 {
@@ -32,8 +33,15 @@ final class MachineStateView
 
     public static function fromAggregate(VendingMachine $vendingMachine): self
     {
-        $state = $vendingMachine->state();
+        return self::fromState($vendingMachine->state());
+    }
 
+    /**
+     * Projects a state snapshot — the shape every domain event carries — into
+     * the flat read-side view.
+     */
+    public static function fromState(VendingMachineState $state): self
+    {
         $stock = array_map(static fn(Product $product): array => [
             'selectorCode' => $product->selectorCode(),
             'priceInCents' => $product->price()->amountInCents(),

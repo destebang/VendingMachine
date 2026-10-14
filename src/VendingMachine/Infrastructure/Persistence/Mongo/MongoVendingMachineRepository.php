@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Infrastructure\Persistence\Mongo;
 
+use App\Shared\Infrastructure\EventBus\DomainEventCollector;
 use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
 use App\VendingMachine\Domain\Model\AcceptedDenominations;
 use App\VendingMachine\Domain\Model\CashReserve;
@@ -20,11 +21,16 @@ use Doctrine\ODM\MongoDB\DocumentManager;
  * MongoDB-backed implementation of the write-side repository, via Doctrine
  * ODM. Translates between the persistence-agnostic `VendingMachine`
  * aggregate and the Mongo-specific `VendingMachineDocument`.
+ *
+ * Once a save has committed, the events the aggregate recorded are released
+ * to the collector; the command-bus middleware publishes them when the
+ * command is done, for every outcome.
  */
 final class MongoVendingMachineRepository implements VendingMachineRepository
 {
     public function __construct(
         private readonly DocumentManager $documentManager,
+        private readonly DomainEventCollector $eventCollector,
     ) {}
 
     public function find(VendingMachineId $id): ?VendingMachine
@@ -72,6 +78,11 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
         $document->cashReserve = self::cashReserveToDocument($state->cashReserve->counts());
 
         $this->documentManager->flush();
+
+        // Only a committed write releases events: a flush that throws (e.g. an
+        // optimistic-lock rejection) collects nothing, so a fact that never
+        // persisted is never published.
+        $this->eventCollector->collect(...$vendingMachine->releaseEvents());
     }
 
     /**

@@ -1,9 +1,14 @@
 parameters:
-    # Middleware Symfony's MessengerPass assembles each bus from.
+    # Middleware Symfony's MessengerPass assembles each bus from. The publish
+    # middleware sits outside `handle_message` on the command bus, so the events
+    # a command recorded are published for every outcome, success or rejection.
     command.bus.middleware:
+        - { id: App\Shared\Infrastructure\EventBus\PublishDomainEventsMiddleware }
         - { id: command.bus.middleware.handle_message }
     query.bus.middleware:
         - { id: query.bus.middleware.handle_message }
+    domain_event.bus.middleware:
+        - { id: domain_event.bus.middleware.handle_message }
 
 services:
     _defaults:
@@ -44,6 +49,12 @@ services:
     Predis\ClientInterface:
         factory: ['App\Kernel\RedisClientFactory', 'create']
 
+    # --- Logging -------------------------------------------------------------
+    # A failing domain event subscriber is logged and swallowed: the write has
+    # already committed, so the command response must not fail.
+    Psr\Log\LoggerInterface:
+        class: Symfony\Component\HttpKernel\Log\Logger
+
     # --- Command bus (Messenger, sync, in-memory) ---------------------------
     # Handlers self-register: `#[CommandHandler]`/`#[QueryHandler]` services are
     # autoconfigured onto this bus, and Symfony's MessengerPass builds the bus
@@ -63,6 +74,9 @@ services:
     command.bus:
         class: Symfony\Component\Messenger\MessageBus
         tags: [messenger.bus]
+        # Public so the integration suite can dispatch commands through the
+        # exact same bus the driving adapters use, wiring included.
+        public: true
         # Replaced by MessengerPass with the middleware list from the
         # `command.bus.middleware` parameter.
         arguments:
@@ -94,6 +108,35 @@ services:
             - []
 
     query.bus.middleware.handle_message:
+        class: Symfony\Component\Messenger\Middleware\HandleMessageMiddleware
+        # Replaced by MessengerPass with the generated handlers locator.
+        arguments:
+            - []
+
+    # --- Domain event bus (Messenger, sync, in-memory) ----------------------
+    # The write-side repository hands the events an aggregate recorded to the
+    # collector once its flush commits; the command-bus middleware publishes
+    # them on this bus when the command is done. There is no transport:
+    # subscribers run synchronously in the same process, so the read-model
+    # projection is up to date by the time the command returns. Subscribers
+    # self-register through `#[DomainEventSubscriber]` — an event may have any
+    # number of them, and no hand-written event→subscriber map lives here.
+    App\Shared\Domain\Event\DomainEventBus:
+        alias: App\Shared\Infrastructure\EventBus\MessengerDomainEventBus
+
+    App\Shared\Infrastructure\EventBus\MessengerDomainEventBus:
+        arguments:
+            $bus: '@domain_event.bus'
+
+    domain_event.bus:
+        class: Symfony\Component\Messenger\MessageBus
+        tags: [messenger.bus]
+        # Replaced by MessengerPass with the middleware list from the
+        # `domain_event.bus.middleware` parameter.
+        arguments:
+            - []
+
+    domain_event.bus.middleware.handle_message:
         class: Symfony\Component\Messenger\Middleware\HandleMessageMiddleware
         # Replaced by MessengerPass with the generated handlers locator.
         arguments:

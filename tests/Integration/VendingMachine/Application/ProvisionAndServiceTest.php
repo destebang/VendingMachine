@@ -4,54 +4,52 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\VendingMachine\Application;
 
+use App\Kernel\ContainerFactory;
 use App\Kernel\DocumentManagerFactory;
 use App\Kernel\RedisClientFactory;
+use App\Shared\Infrastructure\EventBus\DomainEventCollector;
+use App\Tests\Integration\IntegrationTestCase;
+use App\VendingMachine\Application\InsertCoin\InsertCoin;
 use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachine;
-use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachineHandler;
-use App\VendingMachine\Application\ReadModel\MachineStateView;
+use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachineResult;
 use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachine;
-use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachineHandler;
 use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
 use App\VendingMachine\Domain\Model\AcceptedDenominations;
-use App\VendingMachine\Domain\Model\CashReserve;
-use App\VendingMachine\Domain\Model\Denomination;
-use App\VendingMachine\Domain\Model\Money;
-use App\VendingMachine\Domain\Model\Product;
-use App\VendingMachine\Domain\Model\Stock;
-use App\VendingMachine\Domain\Model\VendingMachine;
 use App\VendingMachine\Domain\Model\VendingMachineId;
 use App\VendingMachine\Infrastructure\Persistence\Mongo\MongoVendingMachineRepository;
 use App\VendingMachine\Infrastructure\ReadModel\Redis\RedisVendingMachineStateReadModelRepository;
-use PHPUnit\Framework\TestCase;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
 
 /**
- * Exercises the provision and service use cases against the real MongoDB write
- * model and the real Redis read model, with no in-memory doubles.
+ * Exercises the provision and service use cases through the real command bus
+ * against the real MongoDB write model and the real Redis read model —
+ * projection included — with no in-memory doubles.
  */
-final class ProvisionAndServiceTest extends TestCase
+final class ProvisionAndServiceTest extends IntegrationTestCase
 {
     /** @var list<int> */
     private const ACCEPTED_DENOMINATIONS_IN_CENTS = [5, 10, 25, 100];
+
+    private ContainerBuilder $container;
 
     private MongoVendingMachineRepository $repository;
 
     private RedisVendingMachineStateReadModelRepository $readModel;
 
-    private ProvisionVendingMachineHandler $provision;
-
-    private ServiceVendingMachineHandler $service;
-
     protected function setUp(): void
     {
-        $this->repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $this->container = ContainerFactory::create();
+        $this->repository = new MongoVendingMachineRepository(
+            DocumentManagerFactory::create(),
+            new DomainEventCollector(),
+        );
         $this->readModel = new RedisVendingMachineStateReadModelRepository(RedisClientFactory::create());
-        $this->provision = new ProvisionVendingMachineHandler($this->repository, $this->readModel);
-        $this->service = new ServiceVendingMachineHandler($this->repository, $this->readModel);
     }
 
     public function test_provisioning_persists_an_empty_machine_and_its_projection(): void
     {
-        $result = ($this->provision)(new ProvisionVendingMachine($this->accepted()));
+        /** @var ProvisionVendingMachineResult $result */
+        $result = $this->dispatch($this->container, new ProvisionVendingMachine($this->accepted()));
 
         $stored = $this->repository->find(VendingMachineId::fromString($result->id()));
 
@@ -78,14 +76,18 @@ final class ProvisionAndServiceTest extends TestCase
 
     public function test_service_updates_the_write_model_and_the_projection(): void
     {
-        $id = ($this->provision)(new ProvisionVendingMachine($this->accepted()))->id();
+        $id = $this->provisionId();
 
-        ($this->service)(
-            new ServiceVendingMachine(
-                VendingMachineId::fromString($id),
-                Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
-                CashReserve::fromCounts([100 => 5, 50 => 3]),
-                $this->accepted(),
+        $this->dispatch(
+            $this->container,
+            ServiceVendingMachine::fromInput(
+                $id,
+                [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10]],
+                [
+                    ['denominationInCents' => 100, 'quantity' => 5],
+                    ['denominationInCents' => 50, 'quantity' => 3],
+                ],
+                self::ACCEPTED_DENOMINATIONS_IN_CENTS,
             ),
         );
 
@@ -116,26 +118,28 @@ final class ProvisionAndServiceTest extends TestCase
 
     public function test_service_replaces_the_previous_state(): void
     {
-        $id = ($this->provision)(new ProvisionVendingMachine($this->accepted()))->id();
+        $id = $this->provisionId();
 
-        ($this->service)(
-            new ServiceVendingMachine(
-                VendingMachineId::fromString($id),
-                Stock::fromProducts([
-                    Product::create('WATER', Money::fromCents(65), 10),
-                    Product::create('CHIPS', Money::fromCents(120), 4),
-                ]),
-                CashReserve::fromCounts([100 => 5]),
-                $this->accepted(),
+        $this->dispatch(
+            $this->container,
+            ServiceVendingMachine::fromInput(
+                $id,
+                [
+                    ['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10],
+                    ['selectorCode' => 'CHIPS', 'priceInCents' => 120, 'stock' => 4],
+                ],
+                [['denominationInCents' => 100, 'quantity' => 5]],
+                self::ACCEPTED_DENOMINATIONS_IN_CENTS,
             ),
         );
 
-        ($this->service)(
-            new ServiceVendingMachine(
-                VendingMachineId::fromString($id),
-                Stock::fromProducts([Product::create('CHIPS', Money::fromCents(150), 1)]),
-                CashReserve::fromCounts([50 => 2]),
-                AcceptedDenominations::fromCents([10, 50]),
+        $this->dispatch(
+            $this->container,
+            ServiceVendingMachine::fromInput(
+                $id,
+                [['selectorCode' => 'CHIPS', 'priceInCents' => 150, 'stock' => 1]],
+                [['denominationInCents' => 50, 'quantity' => 2]],
+                [10, 50],
             ),
         );
 
@@ -158,42 +162,46 @@ final class ProvisionAndServiceTest extends TestCase
 
     public function test_service_is_rejected_and_changes_nothing_while_a_transaction_is_pending(): void
     {
-        $id = VendingMachineId::generate();
-        $machine = VendingMachine::create($id, $this->accepted());
-        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+        $id = $this->provisionId();
+        $this->dispatch($this->container, InsertCoin::fromInput($id, 25));
 
-        $this->repository->save($machine);
-        $this->readModel->put($id->toString(), MachineStateView::fromAggregate($machine)->toArray());
+        $thrown = $this->dispatchExpectingFailure(
+            $this->container,
+            ServiceVendingMachine::fromInput(
+                $id,
+                [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10]],
+                [['denominationInCents' => 100, 'quantity' => 5]],
+                self::ACCEPTED_DENOMINATIONS_IN_CENTS,
+            ),
+        );
 
-        try {
-            ($this->service)(
-                new ServiceVendingMachine(
-                    $id,
-                    Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
-                    CashReserve::fromCounts([100 => 5]),
-                    $this->accepted(),
-                ),
-            );
-            self::fail('Expected the service action to be rejected while a transaction is pending.');
-        } catch (PendingTransactionInProgressException $exception) {
-            self::assertStringContainsString('transaction is in progress', $exception->getMessage());
-        }
+        self::assertInstanceOf(PendingTransactionInProgressException::class, $thrown);
+        self::assertStringContainsString('transaction is in progress', $thrown->getMessage());
 
-        $stored = $this->repository->find($id);
+        $stored = $this->repository->find(VendingMachineId::fromString($id));
+
         self::assertNotNull($stored);
         self::assertTrue($stored->state()->stock->isEmpty());
         self::assertTrue($stored->state()->cashReserve->isEmpty());
 
         self::assertSame(
             [
-                'id' => $id->toString(),
+                'id' => $id,
                 'acceptedDenominationsInCents' => self::ACCEPTED_DENOMINATIONS_IN_CENTS,
                 'stock' => [],
                 'cashReserve' => [],
                 'insertedFundsInCents' => 25,
             ],
-            $this->readModel->get($id->toString()),
+            $this->readModel->get($id),
         );
+    }
+
+    private function provisionId(): string
+    {
+        /** @var ProvisionVendingMachineResult $result */
+        $result = $this->dispatch($this->container, new ProvisionVendingMachine($this->accepted()));
+
+        return $result->id();
     }
 
     private function accepted(): AcceptedDenominations

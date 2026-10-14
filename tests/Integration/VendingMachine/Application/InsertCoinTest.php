@@ -4,52 +4,55 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\VendingMachine\Application;
 
+use App\Kernel\ContainerFactory;
 use App\Kernel\DocumentManagerFactory;
 use App\Kernel\RedisClientFactory;
+use App\Shared\Infrastructure\EventBus\DomainEventCollector;
+use App\Tests\Integration\IntegrationTestCase;
 use App\VendingMachine\Application\InsertCoin\InsertCoin;
-use App\VendingMachine\Application\InsertCoin\InsertCoinHandler;
 use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachine;
-use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachineHandler;
+use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachineResult;
 use App\VendingMachine\Domain\Exception\InvalidDenominationException;
 use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
 use App\VendingMachine\Domain\Model\AcceptedDenominations;
 use App\VendingMachine\Domain\Model\VendingMachineId;
 use App\VendingMachine\Infrastructure\Persistence\Mongo\MongoVendingMachineRepository;
 use App\VendingMachine\Infrastructure\ReadModel\Redis\RedisVendingMachineStateReadModelRepository;
-use PHPUnit\Framework\TestCase;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
 
 /**
- * Exercises coin insertion against the real MongoDB write model and the real
- * Redis read model, with no in-memory doubles.
+ * Exercises coin insertion through the real command bus against the real
+ * MongoDB write model and the real Redis read model — projection included —
+ * with no in-memory doubles.
  */
-final class InsertCoinTest extends TestCase
+final class InsertCoinTest extends IntegrationTestCase
 {
     /** @var list<int> */
     private const ACCEPTED_DENOMINATIONS_IN_CENTS = [5, 10, 25, 100];
+
+    private ContainerBuilder $container;
 
     private MongoVendingMachineRepository $repository;
 
     private RedisVendingMachineStateReadModelRepository $readModel;
 
-    private ProvisionVendingMachineHandler $provision;
-
-    private InsertCoinHandler $insertCoin;
-
     protected function setUp(): void
     {
-        $this->repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $this->container = ContainerFactory::create();
+        $this->repository = new MongoVendingMachineRepository(
+            DocumentManagerFactory::create(),
+            new DomainEventCollector(),
+        );
         $this->readModel = new RedisVendingMachineStateReadModelRepository(RedisClientFactory::create());
-        $this->provision = new ProvisionVendingMachineHandler($this->repository, $this->readModel);
-        $this->insertCoin = new InsertCoinHandler($this->repository, $this->readModel);
     }
 
     public function test_inserted_coins_accumulate_in_the_write_model_and_the_projection(): void
     {
-        $id = ($this->provision)(new ProvisionVendingMachine($this->accepted()))->id();
+        $id = $this->provisionId();
 
-        ($this->insertCoin)(InsertCoin::fromInput($id, 25));
-        ($this->insertCoin)(InsertCoin::fromInput($id, 25));
-        ($this->insertCoin)(InsertCoin::fromInput($id, 100));
+        $this->dispatch($this->container, InsertCoin::fromInput($id, 25));
+        $this->dispatch($this->container, InsertCoin::fromInput($id, 25));
+        $this->dispatch($this->container, InsertCoin::fromInput($id, 100));
 
         $stored = $this->repository->find(VendingMachineId::fromString($id));
 
@@ -70,16 +73,14 @@ final class InsertCoinTest extends TestCase
 
     public function test_a_rejected_denomination_changes_neither_the_write_model_nor_the_projection(): void
     {
-        $id = ($this->provision)(new ProvisionVendingMachine($this->accepted()))->id();
+        $id = $this->provisionId();
 
-        ($this->insertCoin)(InsertCoin::fromInput($id, 25));
+        $this->dispatch($this->container, InsertCoin::fromInput($id, 25));
 
-        try {
-            ($this->insertCoin)(InsertCoin::fromInput($id, 50));
-            self::fail('Expected the inserted coin to be rejected.');
-        } catch (InvalidDenominationException $exception) {
-            self::assertStringContainsString('not an allowed denomination', $exception->getMessage());
-        }
+        $thrown = $this->dispatchExpectingFailure($this->container, InsertCoin::fromInput($id, 50));
+
+        self::assertInstanceOf(InvalidDenominationException::class, $thrown);
+        self::assertStringContainsString('not an allowed denomination', $thrown->getMessage());
 
         $stored = $this->repository->find(VendingMachineId::fromString($id));
 
@@ -100,9 +101,20 @@ final class InsertCoinTest extends TestCase
 
     public function test_inserting_into_an_unknown_machine_is_rejected(): void
     {
-        $this->expectException(VendingMachineNotFoundException::class);
+        $thrown = $this->dispatchExpectingFailure(
+            $this->container,
+            InsertCoin::fromInput(VendingMachineId::generate()->toString(), 25),
+        );
 
-        ($this->insertCoin)(InsertCoin::fromInput(VendingMachineId::generate()->toString(), 25));
+        self::assertInstanceOf(VendingMachineNotFoundException::class, $thrown);
+    }
+
+    private function provisionId(): string
+    {
+        /** @var ProvisionVendingMachineResult $result */
+        $result = $this->dispatch($this->container, new ProvisionVendingMachine($this->accepted()));
+
+        return $result->id();
     }
 
     private function accepted(): AcceptedDenominations

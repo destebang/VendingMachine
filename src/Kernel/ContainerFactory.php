@@ -6,7 +6,13 @@ namespace App\Kernel;
 
 use App\Kernel\DependencyInjection\SingleHandlerPerMessagePass;
 use App\Shared\Application\Bus\Attribute\CommandHandler;
+use App\Shared\Application\Bus\Attribute\DomainEventSubscriber;
 use App\Shared\Application\Bus\Attribute\QueryHandler;
+use App\Shared\Domain\Event\DomainEvent;
+use ReflectionClass;
+use ReflectionMethod;
+use ReflectionNamedType;
+use Reflector;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ChildDefinition;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
@@ -41,7 +47,10 @@ final class ContainerFactory
 
     /**
      * Turns the framework-free handler markers into the Messenger tag, so a
-     * use case is wired by adding its handler class alone.
+     * use case is wired by adding its handler class alone. A domain event
+     * subscriber is wired by adding its subscriber class alone too: every
+     * public method that accepts a domain event is tagged onto
+     * `domain_event.bus`, and an event may have any number of subscribers.
      */
     private static function registerHandlerAttributes(ContainerBuilder $container): void
     {
@@ -51,6 +60,39 @@ final class ContainerFactory
 
         $container->registerAttributeForAutoconfiguration(QueryHandler::class, static function (ChildDefinition $definition): void {
             $definition->addTag('messenger.message_handler', ['bus' => 'query.bus']);
+        });
+
+        $container->registerAttributeForAutoconfiguration(DomainEventSubscriber::class, static function (
+            ChildDefinition $definition,
+            DomainEventSubscriber $attribute,
+            Reflector $reflector,
+        ): void {
+            // The marker targets classes, so the reflector is the class itself.
+            if (!$reflector instanceof ReflectionClass) {
+                return;
+            }
+
+            foreach ($reflector->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+                if ($method->isConstructor() || $method->isStatic()) {
+                    continue;
+                }
+
+                $parameters = $method->getParameters();
+                $eventType = count($parameters) === 1 ? $parameters[0]->getType() : null;
+
+                if (!$eventType instanceof ReflectionNamedType || $eventType->isBuiltin()) {
+                    continue;
+                }
+
+                if (!is_a($eventType->getName(), DomainEvent::class, allow_string: true)) {
+                    continue;
+                }
+
+                $definition->addTag('messenger.message_handler', [
+                    'bus' => 'domain_event.bus',
+                    'method' => $method->getName(),
+                ]);
+            }
         });
     }
 }

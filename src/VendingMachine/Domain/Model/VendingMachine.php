@@ -9,6 +9,7 @@ use App\VendingMachine\Domain\Event\CoinInserted;
 use App\VendingMachine\Domain\Event\InsertedFundsReturned;
 use App\VendingMachine\Domain\Event\InsertedFundsReturnedDueToInsufficientChange;
 use App\VendingMachine\Domain\Event\ItemVended;
+use App\VendingMachine\Domain\Event\VendingMachineEvent;
 use App\VendingMachine\Domain\Event\VendingMachineProvisioned;
 use App\VendingMachine\Domain\Event\VendingMachineServiced;
 use App\VendingMachine\Domain\Exception\InsufficientChangeAvailableException;
@@ -35,12 +36,12 @@ use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
  * layer can decide when and how to publish.
  *
  * The version is the aggregate's own optimistic-concurrency counter, and it
- * advances in lockstep with the events: every mutation that records an event
- * bumps it exactly once, before the event is constructed, so each event names
- * the version the machine was left at. One mutation per flush keeps it in step
- * with the version the repository's persistence layer manages. Rejections
- * that throw before mutating change nothing and record nothing, so the version
- * stands still.
+ * advances in lockstep with the events: recording a mutation and advancing
+ * the version are one act inside `record()`, so every event names the version
+ * the machine was left at. One mutation per flush keeps it in step with the
+ * version the repository's persistence layer manages. Rejections that throw
+ * before mutating change nothing and record nothing, so the version stands
+ * still.
  */
 final class VendingMachine
 {
@@ -76,8 +77,10 @@ final class VendingMachine
             CashReserve::empty(),
             0,
         );
-        $vendingMachine->bumpVersion();
-        $vendingMachine->record(new VendingMachineProvisioned($id, $vendingMachine->state()));
+        $vendingMachine->record(static fn(VendingMachineState $state): VendingMachineProvisioned => new VendingMachineProvisioned(
+            $id,
+            $state,
+        ));
 
         return $vendingMachine;
     }
@@ -131,9 +134,8 @@ final class VendingMachine
         }
 
         $this->insertedFunds = $this->insertedFunds->plus($coin);
-        $this->bumpVersion();
 
-        $this->record(new CoinInserted($this->id, $this->state(), $coin));
+        $this->record(fn(VendingMachineState $state): CoinInserted => new CoinInserted($this->id, $state, $coin));
     }
 
     /**
@@ -149,9 +151,14 @@ final class VendingMachine
     {
         $returnedFunds = $this->insertedFunds;
         $this->insertedFunds = InsertedFunds::none();
-        $this->bumpVersion();
 
-        $this->record(new InsertedFundsReturned($this->id, $this->state(), $returnedFunds));
+        $this->record(
+            fn(VendingMachineState $state): InsertedFundsReturned => new InsertedFundsReturned(
+                $this->id,
+                $state,
+                $returnedFunds,
+            ),
+        );
 
         return $returnedFunds;
     }
@@ -203,12 +210,11 @@ final class VendingMachine
             // already changed.
             $returnedFunds = $this->insertedFunds;
             $this->insertedFunds = InsertedFunds::none();
-            $this->bumpVersion();
 
             $this->record(
-                new InsertedFundsReturnedDueToInsufficientChange(
+                fn(VendingMachineState $state): InsertedFundsReturnedDueToInsufficientChange => new InsertedFundsReturnedDueToInsufficientChange(
                     $this->id,
-                    $this->state(),
+                    $state,
                     $returnedFunds,
                     $selectorCode,
                 ),
@@ -222,10 +228,9 @@ final class VendingMachine
         $this->cashReserve = $this->cashReserve->reducedBy($change);
         $product->decreaseStock();
         $this->insertedFunds = InsertedFunds::none();
-        $this->bumpVersion();
 
         $vendedItem = new VendedItem($selectorCode, $price, $change);
-        $this->record(new ItemVended($this->id, $this->state(), $vendedItem));
+        $this->record(fn(VendingMachineState $state): ItemVended => new ItemVended($this->id, $state, $vendedItem));
 
         return $vendedItem;
     }
@@ -249,9 +254,10 @@ final class VendingMachine
         $this->stock = $stock;
         $this->cashReserve = $cashReserve;
         $this->acceptedDenominations = $acceptedDenominations;
-        $this->bumpVersion();
 
-        $this->record(new VendingMachineServiced($this->id, $this->state()));
+        $this->record(
+            fn(VendingMachineState $state): VendingMachineServiced => new VendingMachineServiced($this->id, $state),
+        );
     }
 
     /**
@@ -280,20 +286,19 @@ final class VendingMachine
     }
 
     /**
-     * Advances the aggregate's version by one as part of applying a mutation.
-     * Called exactly once per mutation that records an event, before the event
-     * is constructed, so the event's snapshot and `aggregateVersion()` name
-     * the version the machine was left at — and one bump per flush keeps the
-     * aggregate in step with the version the persistence layer manages for
-     * optimistic locking.
+     * Records a domain event for the mutation just applied. Recording and the
+     * version advance are one act: the version is bumped first, then the
+     * factory builds the event from the state captured after the bump — so
+     * every event names the version the machine was left at, and the bump
+     * cannot be forgotten. One recorded mutation per flush keeps the aggregate
+     * in step with the version the persistence layer manages for optimistic
+     * locking.
+     *
+     * @param callable(VendingMachineState): VendingMachineEvent $eventFactory
      */
-    private function bumpVersion(): void
+    private function record(callable $eventFactory): void
     {
         $this->version++;
-    }
-
-    private function record(DomainEvent $event): void
-    {
-        $this->recordedEvents[] = $event;
+        $this->recordedEvents[] = $eventFactory($this->state());
     }
 }

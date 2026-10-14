@@ -1,0 +1,16 @@
+title: vending_machine.item_vended.v1
+description: >-
+  The full `vending_machine.item_vended.v1` message: the shared integration
+  event envelope, pinned to this message's type and source, with the
+  item-vended `data` payload. Reused by the producer document and, later, by
+  consumer documents.
+allOf:
+  - $ref: './envelope.yaml'
+  - type: object
+    properties:
+      type:
+        const: vending_machine.item_vended.v1
+      source:
+        const: vending-machine
+      data:
+        $ref: './item-vended-v1-data.yaml'

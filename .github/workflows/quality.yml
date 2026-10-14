@@ -31,3 +31,29 @@ jobs:
 
       - name: Guard
         run: docker compose run --rm --no-deps -e GITHUB_TOKEN app vendor/bin/mago guard
+
+      - name: Validate AsyncAPI specs
+        run: |
+          for spec in docs/asyncapi/*.asyncapi.yaml; do
+            echo "Validating $spec"
+            docker run --rm --user=root \
+              -v "$PWD:/work" -w /work \
+              -e SUPPRESS_NO_CONFIG_WARNING=true \
+              asyncapi/cli:6.2.1 validate "$spec"
+          done
+
+      - name: Render AsyncAPI docs
+        run: |
+          docker run --rm --user=root \
+            -v "$PWD:/work" -w /work \
+            -e SUPPRESS_NO_CONFIG_WARNING=true \
+            asyncapi/cli:6.2.1 generate fromTemplate \
+              docs/asyncapi/vending-machine.asyncapi.yaml \
+              @asyncapi/html-template@3.5.6 \
+              --output /work/asyncapi-docs --force-write --no-interactive
+
+      - name: Upload AsyncAPI docs
+        uses: actions/upload-artifact@v4
+        with:
+          name: asyncapi-docs
+          path: asyncapi-docs

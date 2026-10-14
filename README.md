@@ -16,7 +16,10 @@ hand back any change due, and return every inserted coin before buying. The writ
 Redis, and the two are kept in step by domain events published synchronously
 after each command. When an item is vended, a versioned
 `vending_machine.item_vended.v1` message is reliably published to a
-RabbitMQ topic exchange through an embedded outbox and a polling relay. A
+RabbitMQ topic exchange through an embedded outbox and a polling relay. The
+published `item_vended.v1` contract is documented spec-first with AsyncAPI 3.0
+(see [Integration contract](#integration-contract-asyncapi)) and kept honest
+by a contract test, and a
 health check still round-trips data through both stores.
 
 ## Requirements
@@ -181,7 +184,9 @@ docker compose exec -e MONGO_DB=vending_test -e REDIS_URL=redis://redis:6379/1 \
   outcomes. It also covers the domain events: the event each mutation records
   (and its payload) and the rejections that record nothing. The integration
   event translator and the JSON envelope serializer are covered here too:
-  the exact published envelope, and which events are (not) translated.
+  the exact published envelope, and which events are (not) translated — as is
+  the AsyncAPI contract: the serialized message and the spec's own example are
+  both validated against the payload schema from `docs/asyncapi`.
 * **Integration** (`tests/Integration`) — the MongoDB repository, the Redis
   read-model repository and the
   provision/service/insert-coin/select-item/return-coin use cases dispatched
@@ -245,6 +250,61 @@ git config core.hooksPath hooks
 It uses a local `vendor/bin/mago` when available and otherwise runs Mago inside
 the app container; when neither is available it skips with a warning, since CI
 enforces the checks regardless.
+
+## Integration contract (AsyncAPI)
+
+The context's published language — the `vending_machine.item_vended.v1`
+message, its JSON envelope and its AMQP bindings — is documented spec-first in
+[`docs/asyncapi/`](./docs/asyncapi):
+
+* [`vending-machine.asyncapi.yaml`](./docs/asyncapi/vending-machine.asyncapi.yaml)
+  — the producer document (AsyncAPI 3.0): the channel, the `send` operation,
+  the message with its correlation id, and its payload schema and example.
+* [`components/schemas/`](./docs/asyncapi/components/schemas) — the reusable
+  schemas the document (and, later, consumer documents) pull in through `$ref`:
+  the shared integration event `envelope`, the item-vended `data`, and the
+  primitive `cents` and `selector-code` types.
+
+The spec is the source of truth for the contract, and the code is kept honest
+with a contract test (`ItemVendedV1ContractTest`): it serialises an
+`ItemVendedV1` with the real `JsonEnvelopeSerializer` and validates the result
+against the payload schema from the spec, and it validates the spec's own
+example too. Renaming or removing a field on either side — the PHP event, the
+serializer, or the spec — fails the test.
+
+### Versioning policy
+
+A version is a compatibility promise, not a release number. Within `v1`,
+changes may only **add** fields: a consumer written against the current
+document must keep working when a field appears. Any change that would break
+one — removing or renaming a field, changing its type, or changing its meaning
+— is a breaking change and means publishing a new `.v2` channel alongside
+`v1`, never editing `v1` in place. Consumers depend on a version, never on
+`latest`.
+
+### Validating and rendering locally
+
+Both run through the [`asyncapi/cli`](https://hub.docker.com/r/asyncapi/cli)
+Docker image, so no local Node.js is needed:
+
+```bash
+# Validate every spec
+for spec in docs/asyncapi/*.asyncapi.yaml; do
+  docker run --rm --user=root -v "$PWD:/work" -w /work \
+    asyncapi/cli:6.2.1 validate "$spec"
+done
+
+# Render the producer document to HTML
+docker run --rm --user=root -v "$PWD:/work" -w /work \
+  asyncapi/cli:6.2.1 generate fromTemplate \
+    docs/asyncapi/vending-machine.asyncapi.yaml \
+    @asyncapi/html-template@3.5.6 \
+    --output /work/asyncapi-docs --force-write --no-interactive
+# -> asyncapi-docs/index.html
+```
+
+CI (`.github/workflows/quality.yml`) validates every spec and uploads the
+rendered HTML as the `asyncapi-docs` artifact; the app does not serve it.
 
 ## Domain language
 
@@ -478,8 +538,10 @@ get → domain call → save.
 * **New published event** — add a `*V1` class under
   `Application/IntegrationEvent/` (small primitive payload, no domain types —
   the guard enforces it), extend the translator's `match`, and register the
-  type in the envelope serializer's map (`config/services.yaml`). Anything not
-  translated is dropped from the outbox unpublished, by design.
+  type in the envelope serializer's map (`config/services.yaml`). Document the
+  message in [`docs/asyncapi/`](./docs/asyncapi) — a new channel and message
+  reusing the shared `envelope` — so the contract stays spec-first. Anything
+  not translated is dropped from the outbox unpublished, by design.
 * **New consuming context** — on the consumer side, bind a queue to
   `vending_machine.integration` with the routing keys it cares about; in this codebase,
   a class marked `#[IntegrationEventSubscriber]` self-registers onto

@@ -1,0 +1,96 @@
+asyncapi: 3.0.0
+
+info:
+  title: Vending Machine
+  version: 1.0.0
+  description: |
+    The vending machine context's published language: the integration events
+    other contexts may consume, and the JSON envelope they travel in. This
+    document is the source of truth for the `vending_machine.item_vended.v1`
+    message; the code is kept honest with a contract test.
+
+    Versioning policy: a version is a compatibility promise, not a release
+    number. Within `v1`, changes may only **add** fields — a consumer written
+    against the current document must keep working when a field appears. Any
+    change that would break one — removing or renaming a field, changing its
+    type, or changing its meaning — is a breaking change and means publishing
+    a new `.v2` channel alongside `v1`, never editing `v1` in place. Consumers
+    therefore depend on a version, never on `latest`.
+  contact:
+    name: Vending Machine
+  license:
+    name: Proprietary
+
+servers:
+  local:
+    host: 'rabbitmq:5672'
+    protocol: amqp
+    description: >-
+      The local RabbitMQ broker. Messages are published to the durable topic
+      exchange `vending_machine.integration` and routed by message type.
+
+channels:
+  itemVendedV1:
+    address: vending_machine.item_vended.v1
+    title: Item vended (v1)
+    description: >-
+      Published once per completed sale, after the state change has committed.
+    messages:
+      itemVendedV1:
+        $ref: '#/components/messages/itemVendedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: vending_machine.integration
+          type: topic
+          durable: true
+
+operations:
+  sendItemVendedV1:
+    action: send
+    title: Publish an item vended (v1) message
+    description: >-
+      The vending machine context publishes this message to the
+      `vending_machine.integration` topic exchange, routed by the
+      `vending_machine.item_vended.v1` routing key.
+    channel:
+      $ref: '#/channels/itemVendedV1'
+    messages:
+      - $ref: '#/channels/itemVendedV1/messages/itemVendedV1'
+
+components:
+  messages:
+    itemVendedV1:
+      name: itemVendedV1
+      title: An item was vended
+      summary: A customer bought a product; the machine handed it over and paid any change.
+      description: >-
+        Emitted when a selection settles: the product is vended, any change due
+        is paid from the cash reserve, and the inserted funds are reset. The
+        envelope `id` is the id of the causing domain event, so a consumer can
+        deduplicate the at-least-once delivery.
+      contentType: application/json
+      correlationId:
+        description: Correlates the message back to the work that caused it.
+        location: $message.payload#/correlationId
+      payload:
+        $ref: './components/schemas/item-vended-v1-message.yaml'
+      examples:
+        - name: A bottle of water with change
+          summary: WATER costs 0.65, paid with a 1.00 coin; 0.35 is handed back as 0.25 + 0.10.
+          payload:
+            id: 01a12f94-62ac-771b-a72a-f8a35ea379bb
+            type: vending_machine.item_vended.v1
+            source: vending-machine
+            occurredAt: '2026-10-14T10:30:00+00:00'
+            aggregateId: 0190f0c2-1a2b-7c3d-8e4f-0123456789ab
+            aggregateVersion: 7
+            correlationId: 01a12f94-62ac-771b-a72a-f8a35ea379bb
+            data:
+              vendingMachineId: 0190f0c2-1a2b-7c3d-8e4f-0123456789ab
+              selectorCode: WATER
+              priceInCents: 65
+              changeInCents:
+                - 25
+                - 10

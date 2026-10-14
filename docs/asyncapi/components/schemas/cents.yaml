@@ -1,0 +1,7 @@
+title: Cents
+description: >-
+  A non-negative amount of money in integer minor units (cents). Money never
+  travels as a float on the wire: a consumer reads an exact integer it can add
+  up without rounding.
+type: integer
+minimum: 0

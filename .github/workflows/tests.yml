@@ -29,6 +29,17 @@ jobs:
           echo "Stack did not become healthy in time" >&2
           exit 1
 
+      - name: Wait for RabbitMQ
+        run: |
+          for i in $(seq 1 30); do
+            if docker compose exec -T rabbitmq rabbitmq-diagnostics -q ping; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "RabbitMQ did not become healthy in time" >&2
+          exit 1
+
       - name: Run unit test suite
         run: docker compose exec -T app vendor/bin/phpunit --testsuite=unit
 

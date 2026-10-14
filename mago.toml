@@ -23,8 +23,10 @@ too-many-methods = { exclude = ["tests/"], threshold = 15 }
 inline-variable-return = { enabled = false }
 # The aggregate and its state snapshot carry six pieces of state — identity,
 # accepted denominations, stock, cash reserve, inserted funds and version. A
-# wide but coherent state object is not a smell here.
-excessive-parameter-list = { threshold = 6 }
+# wide but coherent state object is not a smell here. Integration events are
+# likewise immutable data carriers whose constructor is the full published
+# envelope plus the event's small payload — a DTO, not logic.
+excessive-parameter-list = { threshold = 6, exclude = ["src/VendingMachine/Application/IntegrationEvent/**"] }
 
 # --- Architectural guard ----------------------------------------------------
 #
@@ -115,6 +117,11 @@ reason = "Predis must not leak into the Domain or Application layers."
 dependency = "MongoDB\\**"
 deny-from = ["App\\VendingMachine\\Domain\\", "App\\VendingMachine\\Application\\"]
 reason = "MongoDB must not leak into the Domain or Application layers."
+
+[[guard.perimeter.restrictions]]
+dependency = "App\\VendingMachine\\Domain\\"
+deny-from = ["App\\VendingMachine\\Application\\IntegrationEvent\\"]
+reason = "Integration events are the context's published language: small primitive payloads, never the domain model. The translator is the only code allowed to see both."
 
 # --- Structural conventions -------------------------------------------------
 

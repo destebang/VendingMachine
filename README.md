@@ -1,25 +1,30 @@
 # Vending Machine
 
 A vending machine, built on standalone Symfony components (no
-`framework-bundle`), with a MongoDB-backed write model (Doctrine ODM) and a
-Redis-backed read model.
+`framework-bundle`), with a MongoDB-backed write model (Doctrine ODM), a
+Redis-backed read model, and integration events published to RabbitMQ.
 
-**Current state: the full customer journey.** The whole stack boots end-to-end —
-HTTP, CLI, MongoDB, Redis, dependency injection, a Messenger command bus, and a
+**Current state: the full customer journey, plus the first integration
+event.** The whole stack boots end-to-end —
+HTTP, CLI, MongoDB, Redis, RabbitMQ, dependency injection, a Messenger command
+bus, and a
 three-layer test suite — and carries the customer-facing use cases: provision a
 vending machine (declaring the denominations it accepts), service it (declare its
 true item stock, coin reserve and accepted denominations), read its current state
 back, insert coins toward the price of an item, select a product to vend it and
 hand back any change due, and return every inserted coin before buying. The write side lives in MongoDB (Doctrine ODM), the read side in
 Redis, and the two are kept in step by domain events published synchronously
-after each command. A health check still round-trips data through both stores.
+after each command. When an item is vended, a versioned
+`vending_machine.item_vended.v1` message is reliably published to a
+RabbitMQ topic exchange through an embedded outbox and a polling relay. A
+health check still round-trips data through both stores.
 
 ## Requirements
 
 * Docker & Docker Compose (everything runs in containers — no local
-  PHP/MongoDB/Redis needed)
-* To run things outside Docker instead: PHP ≥ 8.4 with the `mongodb`
-  extension, Composer, a reachable MongoDB 7 and Redis 7
+  PHP/MongoDB/Redis/RabbitMQ needed)
+* To run things outside Docker instead: PHP ≥ 8.4 with the `mongodb` and
+  `amqp` extensions, Composer, a reachable MongoDB 7, Redis 7 and RabbitMQ 3
 
 ## Running it
 
@@ -27,8 +32,11 @@ after each command. A health check still round-trips data through both stores.
 docker compose up -d --build
 ```
 
-This starts three services: `app` (PHP, serving HTTP on `:8000`),
-`mongodb`, and `redis`.
+This starts five services: `app` (PHP, serving HTTP on `:8000`),
+`mongodb`, `redis`, `rabbitmq` (AMQP on `:5672`, management UI on
+[http://localhost:15672](http://localhost:15672), guest/guest), and
+`outbox-relay` (publishes pending outbox events as integration events; watch
+it with `docker compose logs -f outbox-relay`).
 
 Check that everything is wired up correctly, via HTTP:
 
@@ -171,14 +179,21 @@ docker compose exec -e MONGO_DB=vending_test -e REDIS_URL=redis://redis:6379/1 \
   reserve staying untouched), change-making (largest denominations first,
   backtracking when a greedy choice cannot be completed) and all four selection
   outcomes. It also covers the domain events: the event each mutation records
-  (and its payload) and the rejections that record nothing.
+  (and its payload) and the rejections that record nothing. The integration
+  event translator and the JSON envelope serializer are covered here too:
+  the exact published envelope, and which events are (not) translated.
 * **Integration** (`tests/Integration`) — the MongoDB repository, the Redis
   read-model repository and the
   provision/service/insert-coin/select-item/return-coin use cases dispatched
   through the real command bus against real instances, so the event publication
   and the projection run as in production — including the rules that a command
   rejected after mutating still publishes its events and a no-change command
-  publishes nothing.
+  publishes nothing. The outbox is covered against real infrastructure: saves
+  append `pendingEvents` atomically with the state change, and the relay is
+  run against a real RabbitMQ (a test queue bound to the routing key) proving
+  exactly one `item_vended.v1` message is published per sale, that other
+  events are dropped from the outbox unpublished, and that a failed publish
+  stays pending and is retried.
 * **Functional** (`tests/Functional`) — boots the real HTTP application and the
   real CLI commands and exercises provisioning, servicing, inserting coins,
   reading state, selecting products and returning inserted coins (plus the
@@ -244,10 +259,14 @@ src/
 ├── Kernel/                     # Hand-assembled bootstrap: DI container,
 │   │                            # HTTP front controller, infra factories.
 │   │                            # No business logic lives here.
-│   └── Bus/                     # MessengerCommandBus / MessengerQueryBus adapters
+│   ├── Bus/                     # MessengerCommandBus / MessengerQueryBus adapters
+│   └── IntegrationEvent/        # Messenger AMQP integration bus, JSON envelope
+│                                # serializer, AMQP transport + console wiring
 ├── Shared/                     # Cross-aggregate, framework-free building blocks
 │   ├── Domain/Event/           # DomainEvent + DomainEventBus contracts
 │   ├── Application/Bus/        # Handler/subscriber markers + CommandBus/QueryBus ports
+│   ├── Application/IntegrationEvent/ # IntegrationEvent base, IntegrationEventBus
+│   │                                # port, IntegrationEventSubscriber marker
 │   └── Infrastructure/EventBus/ # Collector, Messenger domain event bus and the
 │                                # command-bus middleware that publishes on commit
 └── VendingMachine/
@@ -266,14 +285,19 @@ src/
     │   ├── SelectItem/               # Customer selects a product; vend + change
     │   ├── ReturnCoin/               # Customer takes back the coins inserted
     │   ├── GetVendingMachineState/   # Read-side query over the Redis projection
+    │   ├── IntegrationEvent/    # The published language: versioned integration
+    │   │                        # events (ItemVendedV1) — never the domain model
+    │   ├── IntegrationEventTranslator/ # Domain event → integration event; the
+    │   │                        # only code allowed to see both
     │   └── ReadModel/           # Read-model port + MachineStateView + the
     │                            # projector that subscribes to domain events
     └── Infrastructure/         # Adapters: the only place that knows about
-        │                        # Mongo/Redis/HTTP/console.
-        ├── Persistence/Mongo/   # Doctrine ODM document + repository
+        │                        # Mongo/Redis/RabbitMQ/HTTP/console.
+        ├── Persistence/Mongo/   # Doctrine ODM document + repository (+ outbox)
         ├── ReadModel/Redis/     # Redis-backed read model repository
         ├── Http/                # HealthCheck + provision/service/insert-coin/select/return/get controllers
-        └── Console/             # HealthCheck + vending-machine commands
+        └── Console/             # HealthCheck + vending-machine commands + the
+                                 # outbox relay
 ```
 
 This is a hexagonal/ports-and-adapters layout: `Domain` and `Application`
@@ -367,6 +391,59 @@ crossing contexts is the job of integration events, a separate concern. Because
 publication is synchronous, the read-model projection it drives is up to date
 by the time the command returns, so reads stay strongly consistent.
 
+### Integration events: the outbox and the relay
+
+Integration events are the context's *published language* — the messages other
+contexts may depend on. They are deliberately separate from domain events:
+separate classes with small primitive payloads, versioned
+(`vending_machine.item_vended.v1`), travelling on their own
+asynchronous bus to the durable topic exchange `vending_machine.integration` on
+RabbitMQ, routed by event type. A Mago guard rule keeps the integration event
+classes free of any `App\VendingMachine\Domain` import.
+
+Three pieces make a vended item reach the broker reliably (see
+[docs/adr/0001](./docs/adr/0001-publish-integration-events-via-an-embedded-outbox.md)
+for the why):
+
+1. **Embedded outbox.** `MongoVendingMachineRepository::save()` appends the
+   aggregate's released events to the document's own `pendingEvents` array
+   *before* `flush()`, so the state change and its outbox entries are one
+   atomic single-document write. `occurredAt` is stamped at write time; the
+   collection carries a multikey index on `pendingEvents.eventId`.
+2. **Translation.** `VendingMachineIntegrationEventTranslator` (Application)
+   is the only code allowed to see both domain and integration events. It
+   maps `ItemVended` to `ItemVendedV1` — envelope id and correlation id are
+   the domain event's id — and drops every other event: the published
+   language exposes only what other contexts may know.
+3. **Polling relay.** `app:outbox:relay` (the `outbox-relay` compose service)
+   polls the write-side documents about every 500 ms
+   (`--poll-interval-ms`), replays each document's pending entries in
+   aggregate-version order, rebuilds the domain event (`fromPayload`),
+   translates it, publishes through the AMQP transport — persistent messages,
+   waiting for the broker's publisher confirm — and only then `$pull`s the
+   entry by its event id. A failed publish stays pending and is retried on
+   the next poll, so delivery is **at-least-once**: consumers must
+   deduplicate on the envelope `id`.
+
+On the wire every message is a JSON envelope (`JsonEnvelopeSerializer`, a
+Messenger `SerializerInterface` — never PHP's `serialize()`):
+
+```json
+{ "id": "uuid", "type": "vending_machine.item_vended.v1", "source": "vending-machine",
+  "occurredAt": "RFC3339", "aggregateId": "...", "aggregateVersion": 7,
+  "correlationId": "...", "data": { "vendingMachineId": "...", "selectorCode": "...",
+  "priceInCents": 65, "changeInCents": [25, 10] } }
+```
+
+`messenger:consume` and `messenger:setup-transports` are wired into
+`bin/console` by hand (no framework-bundle), and the
+`#[IntegrationEventSubscriber]` attribute is ready for the consuming slice:
+mark a service and its public event methods are autoconfigured onto
+`integration.bus`, exactly like `#[DomainEventSubscriber]` does for domain
+events. The context's own queue (`vending-machine.integration`) is already
+bound to `vending_machine.#`, so published messages are visible in the
+[RabbitMQ management UI](http://localhost:15672) until consumers land.
+
 ### MongoDB (write model) / Redis (read model)
 
 `VendingMachineDocument` (Doctrine ODM) is intentionally a separate class
@@ -398,6 +475,15 @@ get → domain call → save.
   existing commands through the `CommandBus` port (or asks queries through the
   `QueryBus` port). The HTTP controller and console command are the template: no
   business logic, only translating input/output.
+* **New published event** — add a `*V1` class under
+  `Application/IntegrationEvent/` (small primitive payload, no domain types —
+  the guard enforces it), extend the translator's `match`, and register the
+  type in the envelope serializer's map (`config/services.yaml`). Anything not
+  translated is dropped from the outbox unpublished, by design.
+* **New consuming context** — on the consumer side, bind a queue to
+  `vending_machine.integration` with the routing keys it cares about; in this codebase,
+  a class marked `#[IntegrationEventSubscriber]` self-registers onto
+  `integration.bus` and `messenger:consume integration_events` runs it.
 
 ## Trade-offs / things I'd revisit next
 
@@ -429,6 +515,18 @@ get → domain call → save.
   projection always reflects the balance after the attempt. That costs a
   no-op write on `InsufficientFunds` and `OutOfStock`, where the machine's state
   does not actually change.
+* Integration event delivery is at-least-once: a relay crash between the
+  broker's confirm and the outbox removal (or a lost race with a concurrent
+  save) republishes a message, so consumers must deduplicate on the envelope
+  `id`. The `correlationId` is simply the causing domain event's id — a real
+  correlation chain can replace it when cross-context tracing matters.
+* The relay polls instead of using MongoDB change streams, because change
+  streams require a replica set and this stack runs a standalone node. The
+  poll is cheap (a multikey index covers it) and tunable, and the published
+  contract would not change if it ever became a change stream.
+* Published messages accumulate in `vending-machine.integration` until the
+  consuming slice lands — visible in the management UI, harmless at this
+  scale, and worth a queue policy (or actual consumers) before real traffic.
 * Two Mago rules are tuned in `mago.toml`: `too-many-methods` is raised and
   skips tests (test classes grow one method per case), and
   `inline-variable-return` is off because its fixer strips the `@var` that

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\VendingMachine\Infrastructure\Persistence\Mongo;
 
 use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
+use App\VendingMachine\Domain\Model\AcceptedDenominations;
 use App\VendingMachine\Domain\Model\CashReserve;
 use App\VendingMachine\Domain\Model\InsertedFunds;
 use App\VendingMachine\Domain\Model\Money;
@@ -36,6 +37,7 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
 
         return VendingMachine::reconstitute(
             $id,
+            AcceptedDenominations::fromCents($document->acceptedDenominationsInCents),
             InsertedFunds::fromDenominations($document->insertedDenominationsInCents),
             Stock::fromProducts(self::stockFromDocument($document->stock)),
             CashReserve::fromCounts(self::cashReserveFromDocument($document->cashReserve)),
@@ -59,6 +61,7 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
             $this->documentManager->persist($document);
         }
 
+        $document->acceptedDenominationsInCents = $state->acceptedDenominations->denominationsInCents();
         $document->insertedDenominationsInCents = $state->insertedFunds->denominationsInCents();
         $document->stock = self::stockToDocument($state->stock->products());
         $document->cashReserve = self::cashReserveToDocument($state->cashReserve->counts());

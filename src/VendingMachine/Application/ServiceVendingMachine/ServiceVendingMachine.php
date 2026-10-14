@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Application\ServiceVendingMachine;
 
+use App\VendingMachine\Domain\Model\AcceptedDenominations;
 use App\VendingMachine\Domain\Model\CashReserve;
 use App\VendingMachine\Domain\Model\Money;
 use App\VendingMachine\Domain\Model\Product;
@@ -12,7 +13,8 @@ use App\VendingMachine\Domain\Model\VendingMachineId;
 
 /**
  * Service action: declare the true physical state of a machine's stock and cash
- * reserve. Semantics are replace, not additive.
+ * reserve, and the denominations it is reconfigured to accept. Semantics are
+ * replace, not additive.
  */
 final class ServiceVendingMachine
 {
@@ -20,6 +22,7 @@ final class ServiceVendingMachine
         public readonly VendingMachineId $vendingMachineId,
         public readonly Stock $stock,
         public readonly CashReserve $cashReserve,
+        public readonly AcceptedDenominations $acceptedDenominations,
     ) {}
 
     /**
@@ -29,9 +32,14 @@ final class ServiceVendingMachine
      *
      * @param list<array{selectorCode: string, priceInCents: int, stock: int}> $stock
      * @param list<array{denominationInCents: int, quantity: int}>            $cashReserve
+     * @param list<int>                                                       $acceptedDenominationsInCents
      */
-    public static function fromInput(string $vendingMachineId, array $stock, array $cashReserve): self
-    {
+    public static function fromInput(
+        string $vendingMachineId,
+        array $stock,
+        array $cashReserve,
+        array $acceptedDenominationsInCents,
+    ): self {
         $products = [];
         foreach ($stock as $row) {
             $products[] = Product::create($row['selectorCode'], Money::fromCents($row['priceInCents']), $row['stock']);
@@ -46,6 +54,7 @@ final class ServiceVendingMachine
             VendingMachineId::fromString($vendingMachineId),
             Stock::fromProducts($products),
             CashReserve::fromCounts($counts),
+            AcceptedDenominations::fromCents($acceptedDenominationsInCents),
         );
     }
 }

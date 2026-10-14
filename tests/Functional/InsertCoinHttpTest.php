@@ -14,6 +14,9 @@ use Symfony\Component\Routing\RouteCollection;
 
 final class InsertCoinHttpTest extends TestCase
 {
+    /** @var list<int> */
+    private const ACCEPTED_DENOMINATIONS_IN_CENTS = [5, 10, 25, 100];
+
     private HttpApplication $application;
 
     protected function setUp(): void
@@ -37,9 +40,25 @@ final class InsertCoinHttpTest extends TestCase
 
         self::assertSame(Response::HTTP_OK, $state->getStatusCode());
         self::assertSame(
-            ['id' => $id, 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 150],
+            [
+                'id' => $id,
+                'acceptedDenominationsInCents' => self::ACCEPTED_DENOMINATIONS_IN_CENTS,
+                'stock' => [],
+                'cashReserve' => [],
+                'insertedFundsInCents' => 150,
+            ],
             json_decode((string) $state->getContent(), associative: true, flags: JSON_THROW_ON_ERROR),
         );
+    }
+
+    public function test_a_machine_rejects_a_coin_outside_its_configured_set(): void
+    {
+        $id = $this->provisionMachine([10, 50]);
+
+        $response = $this->application->handle($this->coinRequest($id, 25));
+
+        self::assertSame(Response::HTTP_BAD_REQUEST, $response->getStatusCode());
+        self::assertSame('InvalidDenomination', $this->payload($response)['error']);
     }
 
     public function test_inserting_a_denomination_the_machine_does_not_accept_is_rejected(): void
@@ -66,9 +85,20 @@ final class InsertCoinHttpTest extends TestCase
         self::assertSame(Response::HTTP_NOT_FOUND, $response->getStatusCode());
     }
 
-    private function provisionMachine(): string
+    /**
+     * @param list<int> $acceptedDenominationsInCents
+     */
+    private function provisionMachine(array $acceptedDenominationsInCents = self::ACCEPTED_DENOMINATIONS_IN_CENTS): string
     {
-        $response = $this->application->handle(Request::create('/vending-machines', 'POST'));
+        $response = $this->application->handle(Request::create(
+            '/vending-machines',
+            'POST',
+            [],
+            [],
+            [],
+            ['CONTENT_TYPE' => 'application/json'],
+            json_encode(['acceptedDenominationsInCents' => $acceptedDenominationsInCents], JSON_THROW_ON_ERROR),
+        ));
 
         return $this->payload($response)['id'];
     }
@@ -88,6 +118,7 @@ final class InsertCoinHttpTest extends TestCase
      *
      * @return array{
      *     id: string,
+     *     acceptedDenominationsInCents: list<int>,
      *     selectorCode: string,
      *     priceInCents: int,
      *     change: list<int>,
@@ -102,6 +133,7 @@ final class InsertCoinHttpTest extends TestCase
     {
         /** @var array{
          *     id: string,
+         *     acceptedDenominationsInCents: list<int>,
          *     selectorCode: string,
          *     priceInCents: int,
          *     change: list<int>,

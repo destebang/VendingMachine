@@ -15,6 +15,7 @@ use App\VendingMachine\Domain\Exception\InsufficientFundsException;
 use App\VendingMachine\Domain\Exception\InvalidDenominationException;
 use App\VendingMachine\Domain\Exception\OutOfStockException;
 use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
+use App\VendingMachine\Domain\Model\AcceptedDenominations;
 use App\VendingMachine\Domain\Model\CashReserve;
 use App\VendingMachine\Domain\Model\Denomination;
 use App\VendingMachine\Domain\Model\InsertedFunds;
@@ -28,14 +29,24 @@ use PHPUnit\Framework\TestCase;
 
 final class VendingMachineTest extends TestCase
 {
+    /** @var list<int> */
+    private const ACCEPTED_DENOMINATIONS_IN_CENTS = [5, 10, 25, 100];
+
     public function test_a_newly_created_machine_starts_empty(): void
     {
-        $state = VendingMachine::create(VendingMachineId::generate())->state();
+        $state = VendingMachine::create(VendingMachineId::generate(), $this->accepted())->state();
 
         self::assertSame(0, $state->version);
         self::assertTrue($state->stock->isEmpty());
         self::assertTrue($state->cashReserve->isEmpty());
         self::assertTrue($state->insertedFunds->isEmpty());
+    }
+
+    public function test_a_newly_created_machine_is_configured_with_the_accepted_denominations(): void
+    {
+        $machine = VendingMachine::create(VendingMachineId::generate(), AcceptedDenominations::fromCents([10, 50]));
+
+        self::assertSame([10, 50], $machine->state()->acceptedDenominations->denominationsInCents());
     }
 
     public function test_reconstitute_restores_identity_version_and_state(): void
@@ -44,6 +55,7 @@ final class VendingMachineTest extends TestCase
 
         $machine = VendingMachine::reconstitute(
             $id,
+            $this->accepted(),
             InsertedFunds::fromDenominations([25, 25]),
             Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 3)]),
             CashReserve::fromCounts([100 => 2]),
@@ -54,6 +66,7 @@ final class VendingMachineTest extends TestCase
 
         self::assertTrue($state->id->equals($id));
         self::assertSame(7, $state->version);
+        self::assertSame(self::ACCEPTED_DENOMINATIONS_IN_CENTS, $state->acceptedDenominations->denominationsInCents());
         self::assertSame(3, $state->stock->quantityOf('WATER'));
         self::assertSame(2, $state->cashReserve->quantityOf(Denomination::of(Money::fromCents(100))));
         self::assertSame(50, $state->insertedFunds->amount()->amountInCents());
@@ -61,16 +74,18 @@ final class VendingMachineTest extends TestCase
 
     public function test_service_replaces_rather_than_adds_to_stock_and_reserve(): void
     {
-        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine = VendingMachine::create(VendingMachineId::generate(), $this->accepted());
 
         $machine->service(
             Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
             CashReserve::fromCounts([100 => 5]),
+            $this->accepted(),
         );
 
         $machine->service(
             Stock::fromProducts([Product::create('CHIPS', Money::fromCents(120), 2)]),
             CashReserve::fromCounts([50 => 1]),
+            $this->accepted(),
         );
 
         $state = $machine->state();
@@ -80,9 +95,22 @@ final class VendingMachineTest extends TestCase
         self::assertSame([50 => 1], $state->cashReserve->counts());
     }
 
+    public function test_service_reconfigures_the_accepted_denominations(): void
+    {
+        $machine = VendingMachine::create(VendingMachineId::generate(), $this->accepted());
+
+        $machine->service(
+            Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
+            CashReserve::fromCounts([100 => 5]),
+            AcceptedDenominations::fromCents([10, 50]),
+        );
+
+        self::assertSame([10, 50], $machine->state()->acceptedDenominations->denominationsInCents());
+    }
+
     public function test_service_is_rejected_while_a_transaction_is_pending(): void
     {
-        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine = VendingMachine::create(VendingMachineId::generate(), $this->accepted());
         $machine->insertCoin(Denomination::of(Money::fromCents(25)));
 
         $this->expectException(PendingTransactionInProgressException::class);
@@ -90,6 +118,7 @@ final class VendingMachineTest extends TestCase
         $machine->service(
             Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
             CashReserve::fromCounts([100 => 5]),
+            $this->accepted(),
         );
     }
 
@@ -97,6 +126,7 @@ final class VendingMachineTest extends TestCase
     {
         $machine = VendingMachine::reconstitute(
             VendingMachineId::generate(),
+            $this->accepted(),
             InsertedFunds::fromDenominations([25, 25]),
             Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 3)]),
             CashReserve::fromCounts([100 => 2]),
@@ -107,6 +137,7 @@ final class VendingMachineTest extends TestCase
             $machine->service(
                 Stock::fromProducts([Product::create('CHIPS', Money::fromCents(120), 10)]),
                 CashReserve::fromCounts([50 => 9]),
+                $this->accepted(),
             );
             self::fail('Expected the service action to be rejected while a transaction is pending.');
         } catch (PendingTransactionInProgressException) {
@@ -119,7 +150,7 @@ final class VendingMachineTest extends TestCase
 
     public function test_inserting_accepted_coins_accumulates(): void
     {
-        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine = VendingMachine::create(VendingMachineId::generate(), $this->accepted());
 
         $machine->insertCoin(Denomination::of(Money::fromCents(25)));
         $machine->insertCoin(Denomination::of(Money::fromCents(25)));
@@ -134,7 +165,7 @@ final class VendingMachineTest extends TestCase
     #[DataProvider('acceptedDenominations')]
     public function test_every_accepted_denomination_is_recorded(int $amountInCents): void
     {
-        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine = VendingMachine::create(VendingMachineId::generate(), $this->accepted());
 
         $machine->insertCoin(Denomination::of(Money::fromCents($amountInCents)));
 
@@ -154,7 +185,7 @@ final class VendingMachineTest extends TestCase
 
     public function test_inserting_a_denomination_the_machine_does_not_accept_is_rejected(): void
     {
-        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine = VendingMachine::create(VendingMachineId::generate(), $this->accepted());
 
         $this->expectException(InvalidDenominationException::class);
 
@@ -163,7 +194,7 @@ final class VendingMachineTest extends TestCase
 
     public function test_a_rejected_denomination_leaves_the_balance_untouched(): void
     {
-        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine = VendingMachine::create(VendingMachineId::generate(), $this->accepted());
         $machine->insertCoin(Denomination::of(Money::fromCents(25)));
 
         try {
@@ -174,9 +205,31 @@ final class VendingMachineTest extends TestCase
         }
     }
 
+    public function test_a_machine_only_accepts_the_denominations_it_is_configured_with(): void
+    {
+        $machine = VendingMachine::create(VendingMachineId::generate(), AcceptedDenominations::fromCents([10, 50]));
+
+        $machine->insertCoin(Denomination::of(Money::fromCents(10)));
+        $machine->insertCoin(Denomination::of(Money::fromCents(50)));
+
+        self::assertSame(60, $machine->state()->insertedFunds->amount()->amountInCents());
+    }
+
+    public function test_the_rejection_reports_the_machines_own_accepted_set(): void
+    {
+        $machine = VendingMachine::create(VendingMachineId::generate(), AcceptedDenominations::fromCents([10, 50]));
+
+        try {
+            $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+            self::fail('Expected the inserted coin to be rejected.');
+        } catch (InvalidDenominationException $exception) {
+            self::assertStringContainsString('10, 50', $exception->getMessage());
+        }
+    }
+
     public function test_returning_inserted_funds_hands_back_the_exact_coins_and_resets_the_balance(): void
     {
-        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine = VendingMachine::create(VendingMachineId::generate(), $this->accepted());
 
         $machine->insertCoin(Denomination::of(Money::fromCents(25)));
         $machine->insertCoin(Denomination::of(Money::fromCents(10)));
@@ -202,7 +255,7 @@ final class VendingMachineTest extends TestCase
 
     public function test_returning_with_nothing_inserted_is_a_no_op(): void
     {
-        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine = VendingMachine::create(VendingMachineId::generate(), $this->accepted());
 
         $returnedFunds = $machine->returnInsertedFunds();
 
@@ -213,7 +266,7 @@ final class VendingMachineTest extends TestCase
 
     public function test_a_return_ends_the_pending_transaction_so_the_machine_can_be_serviced(): void
     {
-        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine = VendingMachine::create(VendingMachineId::generate(), $this->accepted());
         $machine->insertCoin(Denomination::of(Money::fromCents(25)));
 
         $machine->returnInsertedFunds();
@@ -221,6 +274,7 @@ final class VendingMachineTest extends TestCase
         $machine->service(
             Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
             CashReserve::fromCounts([100 => 5]),
+            $this->accepted(),
         );
 
         self::assertSame(10, $machine->state()->stock->quantityOf('WATER'));
@@ -316,6 +370,7 @@ final class VendingMachineTest extends TestCase
         // empty — so the sale is rejected and the whole 100 cents is handed back.
         $machine = VendingMachine::reconstitute(
             VendingMachineId::generate(),
+            $this->accepted(),
             InsertedFunds::none(),
             Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
             CashReserve::empty(),
@@ -340,7 +395,7 @@ final class VendingMachineTest extends TestCase
 
     public function test_create_records_a_vending_machine_provisioned_event(): void
     {
-        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine = VendingMachine::create(VendingMachineId::generate(), $this->accepted());
 
         $events = $machine->releaseEvents();
 
@@ -356,7 +411,7 @@ final class VendingMachineTest extends TestCase
 
     public function test_release_events_returns_every_recorded_event_and_clears_them(): void
     {
-        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine = VendingMachine::create(VendingMachineId::generate(), $this->accepted());
         $machine->insertCoin(Denomination::of(Money::fromCents(25)));
 
         $events = $machine->releaseEvents();
@@ -369,12 +424,13 @@ final class VendingMachineTest extends TestCase
 
     public function test_service_records_a_vending_machine_serviced_event(): void
     {
-        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine = VendingMachine::create(VendingMachineId::generate(), $this->accepted());
         $machine->releaseEvents();
 
         $machine->service(
             Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
             CashReserve::fromCounts([100 => 5]),
+            $this->accepted(),
         );
 
         $events = $machine->releaseEvents();
@@ -389,7 +445,7 @@ final class VendingMachineTest extends TestCase
 
     public function test_a_service_rejected_while_a_transaction_is_pending_records_no_event(): void
     {
-        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine = VendingMachine::create(VendingMachineId::generate(), $this->accepted());
         $machine->insertCoin(Denomination::of(Money::fromCents(25)));
         $machine->releaseEvents();
 
@@ -397,6 +453,7 @@ final class VendingMachineTest extends TestCase
             $machine->service(
                 Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
                 CashReserve::fromCounts([100 => 5]),
+                $this->accepted(),
             );
             self::fail('Expected the service action to be rejected while a transaction is pending.');
         } catch (PendingTransactionInProgressException) {
@@ -422,7 +479,7 @@ final class VendingMachineTest extends TestCase
 
     public function test_a_rejected_denomination_records_no_event(): void
     {
-        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine = VendingMachine::create(VendingMachineId::generate(), $this->accepted());
         $machine->releaseEvents();
 
         try {
@@ -454,7 +511,7 @@ final class VendingMachineTest extends TestCase
 
     public function test_returning_with_nothing_inserted_still_records_the_return(): void
     {
-        $machine = VendingMachine::create(VendingMachineId::generate());
+        $machine = VendingMachine::create(VendingMachineId::generate(), $this->accepted());
         $machine->releaseEvents();
 
         $machine->returnInsertedFunds();
@@ -519,6 +576,7 @@ final class VendingMachineTest extends TestCase
     {
         $machine = VendingMachine::reconstitute(
             VendingMachineId::generate(),
+            $this->accepted(),
             InsertedFunds::none(),
             Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 10)]),
             CashReserve::empty(),
@@ -546,10 +604,16 @@ final class VendingMachineTest extends TestCase
         }
     }
 
+    private function accepted(): AcceptedDenominations
+    {
+        return AcceptedDenominations::fromCents(self::ACCEPTED_DENOMINATIONS_IN_CENTS);
+    }
+
     private function stockedMachine(int $waterStock = 10): VendingMachine
     {
         return VendingMachine::reconstitute(
             VendingMachineId::generate(),
+            $this->accepted(),
             InsertedFunds::none(),
             Stock::fromProducts([
                 Product::create('WATER', Money::fromCents(65), $waterStock),

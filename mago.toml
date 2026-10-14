@@ -21,6 +21,10 @@ too-many-methods = { exclude = ["tests/"], threshold = 15 }
 # Its fixer inlines `$x = ...; return $x;`, which strips the `@var` that narrows
 # a `mixed` value and re-opens analyzer errors. Keep the explicit assignment.
 inline-variable-return = { enabled = false }
+# The aggregate and its state snapshot carry six pieces of state — identity,
+# accepted denominations, stock, cash reserve, inserted funds and version. A
+# wide but coherent state object is not a smell here.
+excessive-parameter-list = { threshold = 6 }
 
 # --- Architectural guard ----------------------------------------------------
 #

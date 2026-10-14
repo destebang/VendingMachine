@@ -33,21 +33,6 @@ final readonly class Denomination
         return new self($amount);
     }
 
-    /**
-     * A coin or note of the given amount, rejected unless it belongs to the
-     * caller's allowed set.
-     *
-     * @param list<int> $allowedAmountsInCents
-     */
-    public static function fromCents(int $amountInCents, array $allowedAmountsInCents): self
-    {
-        if (!in_array($amountInCents, $allowedAmountsInCents, strict: true)) {
-            throw InvalidDenominationException::notAllowed($amountInCents, $allowedAmountsInCents);
-        }
-
-        return new self(Money::fromCents($amountInCents));
-    }
-
     public function amount(): Money
     {
         return $this->amount;

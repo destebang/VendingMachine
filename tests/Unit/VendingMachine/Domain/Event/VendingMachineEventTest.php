@@ -10,6 +10,7 @@ use App\VendingMachine\Domain\Event\InsertedFundsReturnedDueToInsufficientChange
 use App\VendingMachine\Domain\Event\ItemVended;
 use App\VendingMachine\Domain\Event\VendingMachineProvisioned;
 use App\VendingMachine\Domain\Event\VendingMachineServiced;
+use App\VendingMachine\Domain\Model\AcceptedDenominations;
 use App\VendingMachine\Domain\Model\CashReserve;
 use App\VendingMachine\Domain\Model\ChangeDue;
 use App\VendingMachine\Domain\Model\Denomination;
@@ -135,6 +136,7 @@ final class VendingMachineEventTest extends TestCase
     {
         return new VendingMachineState(
             VendingMachineId::fromString('0190f0c2-1a2b-7c3d-8e4f-0123456789ab'),
+            AcceptedDenominations::fromCents([5, 10, 25, 100]),
             Stock::fromProducts([Product::create('WATER', Money::fromCents(65), 9)]),
             CashReserve::fromCounts([25 => 3, 10 => 1]),
             InsertedFunds::fromDenominations([25, 10]),
@@ -145,6 +147,7 @@ final class VendingMachineEventTest extends TestCase
     /**
      * @return array{
      *     id: string,
+     *     acceptedDenominationsInCents: list<int>,
      *     stock: list<array{selectorCode: string, priceInCents: int, stock: int}>,
      *     cashReserve: list<array{denominationInCents: int, quantity: int}>,
      *     insertedFunds: array{denominationsInCents: list<int>},
@@ -155,6 +158,7 @@ final class VendingMachineEventTest extends TestCase
     {
         return [
             'id' => '0190f0c2-1a2b-7c3d-8e4f-0123456789ab',
+            'acceptedDenominationsInCents' => [5, 10, 25, 100],
             'stock' => [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 9]],
             'cashReserve' => [
                 ['denominationInCents' => 25, 'quantity' => 3],

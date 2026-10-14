@@ -24,6 +24,16 @@ class VendingMachineDocument
     public int $version = 0;
 
     /**
+     * The denominations the machine accepts from a customer, in cents.
+     * Machine configuration set at provisioning and replaceable at service,
+     * stored as a list of amounts.
+     *
+     * @var list<int>
+     */
+    #[ODM\Field(type: 'raw')]
+    public array $acceptedDenominationsInCents = [];
+
+    /**
      * The literal coins the customer has inserted, in cents, in the order they
      * were inserted. Stored as a list (not a total) so a return can hand back
      * exactly these coins.

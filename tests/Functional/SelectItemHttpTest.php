@@ -14,6 +14,9 @@ use Symfony\Component\Routing\RouteCollection;
 
 final class SelectItemHttpTest extends TestCase
 {
+    /** @var list<int> */
+    private const ACCEPTED_DENOMINATIONS_IN_CENTS = [5, 10, 25, 100];
+
     private HttpApplication $application;
 
     protected function setUp(): void
@@ -146,7 +149,15 @@ final class SelectItemHttpTest extends TestCase
 
     private function provisionMachine(): string
     {
-        $response = $this->application->handle(Request::create('/vending-machines', 'POST'));
+        $response = $this->application->handle(Request::create(
+            '/vending-machines',
+            'POST',
+            [],
+            [],
+            [],
+            ['CONTENT_TYPE' => 'application/json'],
+            json_encode(['acceptedDenominationsInCents' => self::ACCEPTED_DENOMINATIONS_IN_CENTS], JSON_THROW_ON_ERROR),
+        ));
 
         return $this->payload($response)['id'];
     }
@@ -189,7 +200,11 @@ final class SelectItemHttpTest extends TestCase
             [],
             [],
             ['CONTENT_TYPE' => 'application/json'],
-            json_encode(['stock' => $stock, 'cashReserve' => $cashReserve], JSON_THROW_ON_ERROR),
+            json_encode([
+                'stock' => $stock,
+                'cashReserve' => $cashReserve,
+                'acceptedDenominationsInCents' => self::ACCEPTED_DENOMINATIONS_IN_CENTS,
+            ], JSON_THROW_ON_ERROR),
         ));
 
         self::assertSame(Response::HTTP_OK, $response->getStatusCode());
@@ -226,6 +241,7 @@ final class SelectItemHttpTest extends TestCase
     /**
      * @return array{
      *     id: string,
+     *     acceptedDenominationsInCents: list<int>,
      *     selectorCode: string,
      *     priceInCents: int,
      *     change: list<int>,
@@ -247,6 +263,7 @@ final class SelectItemHttpTest extends TestCase
      *
      * @return array{
      *     id: string,
+     *     acceptedDenominationsInCents: list<int>,
      *     selectorCode: string,
      *     priceInCents: int,
      *     change: list<int>,
@@ -261,6 +278,7 @@ final class SelectItemHttpTest extends TestCase
     {
         /** @var array{
          *     id: string,
+         *     acceptedDenominationsInCents: list<int>,
          *     selectorCode: string,
          *     priceInCents: int,
          *     change: list<int>,

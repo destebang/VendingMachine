@@ -27,6 +27,13 @@ _Avoid_: inventory, load, contents
 A single physical coin or note, described by its amount.
 _Avoid_: coin type, denomination value, unit
 
+**Accepted denominations**:
+The denominations a machine takes from a customer, set when it is provisioned
+and replaceable at service. A property of the machine, not of a coin: the same
+coin can be legal tender and still be rejected by a machine that does not take
+it.
+_Avoid_: allowed coins, coin set, accepted tender
+
 **Cash reserve**:
 The physical coins and notes a machine holds in order to pay change.
 _Avoid_: change, float, hopper, cash box
@@ -62,8 +69,9 @@ from the cash reserve.
 _Avoid_: refund, cancel, eject, coin return
 
 **Service**:
-A technician declaring a machine's true stock and cash reserve, replacing
-whatever was there. Rejected while a transaction is pending.
+A technician declaring a machine's true stock and cash reserve, and the
+denominations it is reconfigured to accept, replacing whatever was there.
+Rejected while a transaction is pending.
 _Avoid_: restock, refill, fill, replenish
 
 **Money**:

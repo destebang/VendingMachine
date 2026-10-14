@@ -20,12 +20,12 @@ use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
 /**
  * Write-side aggregate root for a single vending machine.
  *
- * It carries identity, the stock it holds, the cash reserve it pays change
- * from, the funds a customer has inserted so far, and the optimistic
- * concurrency version expected by the repository/persistence layer. Each
- * collection is a value object rather than a raw array, so its invariants and
- * shape live here instead of being re-derived by the projection and the
- * repository.
+ * It carries identity, the denominations it accepts, the stock it holds, the
+ * cash reserve it pays change from, the funds a customer has inserted so far,
+ * and the optimistic concurrency version expected by the
+ * repository/persistence layer. Each collection is a value object rather than a
+ * raw array, so its invariants and shape live here instead of being re-derived
+ * by the projection and the repository.
  *
  * The aggregate exposes behaviour, not its fields: everything the outside world
  * reads comes out through a single `state()` snapshot.
@@ -37,16 +37,6 @@ use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
 final class VendingMachine
 {
     /**
-     * The denominations this machine accepts from a customer: 5c, 10c, 25c and
-     * 1 unit. A property of the machine rather than of a coin — the same coin
-     * can be legal tender and still be rejected by a machine that does not take
-     * it.
-     *
-     * @var list<int>
-     */
-    public const ACCEPTED_DENOMINATIONS_IN_CENTS = [5, 10, 25, 100];
-
-    /**
      * The domain events recorded since the last release, in the order the
      * mutations happened.
      *
@@ -56,6 +46,7 @@ final class VendingMachine
 
     private function __construct(
         private readonly VendingMachineId $id,
+        private AcceptedDenominations $acceptedDenominations,
         private InsertedFunds $insertedFunds,
         private Stock $stock,
         private CashReserve $cashReserve,
@@ -63,12 +54,20 @@ final class VendingMachine
     ) {}
 
     /**
-     * A brand-new, unstocked machine: empty stock, empty reserve, no inserted
-     * funds. Records the machine's first event.
+     * A brand-new, unstocked machine accepting the given denominations: empty
+     * stock, empty reserve, no inserted funds. Records the machine's first
+     * event.
      */
-    public static function create(VendingMachineId $id): self
+    public static function create(VendingMachineId $id, AcceptedDenominations $acceptedDenominations): self
     {
-        $vendingMachine = new self($id, InsertedFunds::none(), Stock::empty(), CashReserve::empty(), 0);
+        $vendingMachine = new self(
+            $id,
+            $acceptedDenominations,
+            InsertedFunds::none(),
+            Stock::empty(),
+            CashReserve::empty(),
+            0,
+        );
         $vendingMachine->record(new VendingMachineProvisioned($id, $vendingMachine->state()));
 
         return $vendingMachine;
@@ -81,12 +80,13 @@ final class VendingMachine
      */
     public static function reconstitute(
         VendingMachineId $id,
+        AcceptedDenominations $acceptedDenominations,
         InsertedFunds $insertedFunds,
         Stock $stock,
         CashReserve $cashReserve,
         int $version,
     ): self {
-        return new self($id, $insertedFunds, $stock, $cashReserve, $version);
+        return new self($id, $acceptedDenominations, $insertedFunds, $stock, $cashReserve, $version);
     }
 
     /**
@@ -97,6 +97,7 @@ final class VendingMachine
     {
         return new VendingMachineState(
             $this->id,
+            $this->acceptedDenominations,
             $this->stock,
             $this->cashReserve,
             $this->insertedFunds,
@@ -113,10 +114,11 @@ final class VendingMachine
      */
     public function insertCoin(Denomination $coin): void
     {
-        $amountInCents = $coin->amount()->amountInCents();
-
-        if (!in_array($amountInCents, self::ACCEPTED_DENOMINATIONS_IN_CENTS, strict: true)) {
-            throw InvalidDenominationException::notAllowed($amountInCents, self::ACCEPTED_DENOMINATIONS_IN_CENTS);
+        if (!$this->acceptedDenominations->accepts($coin)) {
+            throw InvalidDenominationException::notAllowed(
+                $coin->amount()->amountInCents(),
+                $this->acceptedDenominations->denominationsInCents(),
+            );
         }
 
         $this->insertedFunds = $this->insertedFunds->plus($coin);
@@ -208,15 +210,16 @@ final class VendingMachine
     }
 
     /**
-     * Service action: replaces the whole stock and cash reserve with the state
-     * the technician declares. Replace, not additive — the technician reports
-     * the true current physical state, never a delta.
+     * Service action: replaces the whole stock, cash reserve and accepted
+     * denominations with the state the technician declares. Replace, not
+     * additive — the technician reports the true current physical state (and the
+     * coin set the machine is reconfigured to take), never a delta.
      *
      * Rejected while a customer transaction is in flight, so a service visit
      * can never rewrite the machine out from under inserted funds. A rejected
      * service throws before any mutation and records nothing.
      */
-    public function service(Stock $stock, CashReserve $cashReserve): void
+    public function service(Stock $stock, CashReserve $cashReserve, AcceptedDenominations $acceptedDenominations): void
     {
         if ($this->hasPendingTransaction()) {
             throw PendingTransactionInProgressException::cannotService($this->id);
@@ -224,6 +227,7 @@ final class VendingMachine
 
         $this->stock = $stock;
         $this->cashReserve = $cashReserve;
+        $this->acceptedDenominations = $acceptedDenominations;
 
         $this->record(new VendingMachineServiced($this->id, $this->state()));
     }

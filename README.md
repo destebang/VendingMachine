@@ -7,10 +7,10 @@ Redis-backed read model.
 **Current state: the full customer journey.** The whole stack boots end-to-end —
 HTTP, CLI, MongoDB, Redis, dependency injection, a Messenger command bus, and a
 three-layer test suite — and carries the customer-facing use cases: provision a
-vending machine, service it (declare its true item stock and coin reserve), read
-its current state back, insert coins toward the price of an item, select a
-product to vend it and hand back any change due, and return every inserted coin
-before buying. The write side lives in MongoDB (Doctrine ODM), the read side in
+vending machine (declaring the denominations it accepts), service it (declare its
+true item stock, coin reserve and accepted denominations), read its current state
+back, insert coins toward the price of an item, select a product to vend it and
+hand back any change due, and return every inserted coin before buying. The write side lives in MongoDB (Doctrine ODM), the read side in
 Redis, and the two are kept in step by the command handlers. A health check still
 round-trips data through both stores.
 
@@ -47,16 +47,19 @@ docker compose exec app php bin/console app:health-check
 
 ## Using it
 
-Provision a machine (empty stock, empty cash reserve, no inserted funds) and
-note its id:
+Provision a machine, declaring the denominations it accepts from a customer
+(empty stock, empty cash reserve, no inserted funds), and note its id:
 
 ```bash
-curl -s -X POST http://localhost:8000/vending-machines
+curl -s -X POST http://localhost:8000/vending-machines \
+  -H 'Content-Type: application/json' \
+  -d '{"acceptedDenominationsInCents":[5,10,25,100]}'
 # -> {"id":"01a12f94-62ac-771b-a72a-f8a35ea379bb"}
 ```
 
-Service it: declare its **true** item stock and coin reserve. These replace the
-previous state, they are not added to it — and the action is rejected with a
+Service it: declare its **true** item stock and coin reserve, and the
+denominations it is reconfigured to accept. These replace the previous state,
+they are not added to it — and the action is rejected with a
 `PendingTransactionInProgress` (HTTP 409) while a customer transaction is in
 flight.
 
@@ -64,20 +67,22 @@ flight.
 curl -s -X POST http://localhost:8000/vending-machines/$ID/service \
   -H 'Content-Type: application/json' \
   -d '{"stock":[{"selectorCode":"WATER","priceInCents":65,"stock":10}],
-       "cashReserve":[{"denominationInCents":100,"quantity":5}]}'
+       "cashReserve":[{"denominationInCents":100,"quantity":5}],
+       "acceptedDenominationsInCents":[5,10,25,100]}'
 ```
 
 Read the current state back from the Redis read model:
 
 ```bash
 curl -s http://localhost:8000/vending-machines/$ID
-# -> {"id":"...","stock":[{"selectorCode":"WATER","priceInCents":65,"stock":10}],
+# -> {"id":"...","acceptedDenominationsInCents":[5,10,25,100],
+#     "stock":[{"selectorCode":"WATER","priceInCents":65,"stock":10}],
 #     "cashReserve":[{"denominationInCents":100,"quantity":5}],"insertedFundsInCents":0}
 ```
 
-Insert a coin: the machine accepts 5, 10, 25 and 100 cent coins, rejects
-anything else, and the response carries the updated balance
-(`insertedFundsInCents`):
+Insert a coin: the machine accepts the denominations it was provisioned with
+(5, 10, 25 and 100 in this example), rejects anything else, and the response
+carries the updated balance (`insertedFundsInCents`):
 
 ```bash
 curl -s -X POST http://localhost:8000/vending-machines/$ID/coins \
@@ -115,10 +120,12 @@ The same use cases are available through the CLI, dispatching the exact same
 commands through the same bus:
 
 ```bash
-docker compose exec app php bin/console app:vending-machine:provision
+docker compose exec app php bin/console app:vending-machine:provision \
+  --accepted-denominations-in-cents='[5,10,25,100]'
 docker compose exec app php bin/console app:vending-machine:service $ID \
   --stock='[{"selectorCode":"WATER","priceInCents":65,"stock":10}]' \
-  --cash-reserve='[{"denominationInCents":100,"quantity":5}]'
+  --cash-reserve='[{"denominationInCents":100,"quantity":5}]' \
+  --accepted-denominations-in-cents='[5,10,25,100]'
 docker compose exec app php bin/console app:vending-machine:insert-coin $ID --denomination-in-cents=25
 docker compose exec app php bin/console app:vending-machine:select-item $ID WATER
 docker compose exec app php bin/console app:vending-machine:return-coin $ID
@@ -155,8 +162,9 @@ docker compose exec -e MONGO_DB=vending_test -e REDIS_URL=redis://redis:6379/1 \
 ```
 
 * **Unit** (`tests/Unit`) — domain value objects and entities
-  (`Money`, `Denomination`, `Product`, `ChangeDue`, `InsertedFunds`,
-  `VendingMachine`), exercised in isolation with no I/O, including the service
+  (`Money`, `Denomination`, `AcceptedDenominations`, `Product`, `ChangeDue`,
+  `InsertedFunds`, `VendingMachine`), exercised in isolation with no I/O,
+  including the service
   replace semantics, the mid-transaction rejection, coin insertion (accepted
   denominations accumulating, rejected ones leaving the balance untouched),
   returning inserted funds (the exact coins handed back, the no-op case and the
@@ -359,10 +367,11 @@ balance.
 * The read-model port still speaks a raw state array; `MachineStateView` is the
   typed projection on top of it. Folding the DTO into the port signature is a
   natural next step once a second projection shape exists.
-* The accepted-denomination allow-list lives on the `VendingMachine`
-  aggregate (`ACCEPTED_DENOMINATIONS_IN_CENTS`) rather than being configurable
-  per machine. Fine while every machine takes the same coins; a per-machine set
-  would move onto the aggregate and into the Mongo document.
+* Accepted denominations are per-machine state (`AcceptedDenominations`), set at
+  provisioning and replaceable at service, and flow through the Mongo document
+  and the read-model projection. The amounts are still named `...InCents`, which
+  bakes in a 1/100 minor unit; a `Currency` concept and a global rename to minor
+  units is the follow-up.
 * Inserted funds are modelled as the collection of the individual coins
   inserted (`InsertedFunds`), so a return can hand back exactly those coins —
   never a set drawn from the reserve. The read model still projects only their

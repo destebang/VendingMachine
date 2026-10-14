@@ -349,6 +349,72 @@ Prefer those terms in code, comments and commits.
 
 ## Architecture
 
+The runtime picture — two bounded contexts, the write/read split inside
+`VendingMachine`, and the outbox → relay → broker → consumer chain that
+connects them to `Sales`:
+
+```mermaid
+flowchart TB
+    Client["HTTP client / CLI"]
+
+    subgraph VM["VendingMachine context"]
+        direction TB
+        CmdBus["CommandBus"]
+        QryBus["QueryBus"]
+        Handlers["Use case handlers<br/>(Provision / Service / InsertCoin /<br/>SelectItem / ReturnCoin)"]
+        Aggregate["VendingMachine aggregate<br/>(Domain, no I/O)"]
+        Translator["IntegrationEventTranslator<br/>(Domain event → integration event)"]
+        Projector["ReadModel Projector<br/>(#[DomainEventSubscriber])"]
+        Mongo[("MongoDB<br/>write model + embedded outbox")]
+        Redis[("Redis<br/>read model")]
+    end
+
+    subgraph Async["Asynchronous delivery"]
+        direction TB
+        Relay["outbox-relay<br/>(polls ~500ms)"]
+        Rabbit[("RabbitMQ<br/>vending_machine.integration")]
+    end
+
+    subgraph Sales["Sales context (depends only on the published contract)"]
+        direction TB
+        Worker["sales-worker<br/>(messenger:consume)"]
+        SalesHandler["RegisterSaleHandler"]
+        SalesRepo[("MongoDB<br/>sales, unique index on sourceEventId")]
+        DLQ["sales.item_vended.dlq"]
+    end
+
+    Client --> CmdBus
+    Client --> QryBus
+    CmdBus --> Handlers
+    QryBus -. "reads only" .-> Redis
+    Handlers --> Aggregate
+    Aggregate -- "save (version-checked)" --> Mongo
+    Aggregate -. "domain events<br/>(sync, in-process)" .-> Projector
+    Projector --> Redis
+    Mongo -- "pendingEvents<br/>(same atomic write)" --> Relay
+    Relay --> Translator
+    Translator -- "ItemVendedV1<br/>(JSON envelope)" --> Rabbit
+    Rabbit --> Worker
+    Worker --> SalesHandler
+    SalesHandler --> SalesRepo
+    Worker -. "retries exhausted" .-> DLQ
+
+    classDef tradeoff stroke-dasharray: 4 3,stroke:#b35900,color:#b35900;
+    class Relay,Rabbit,Mongo tradeoff;
+```
+
+Dashed, orange-outlined nodes (`Mongo`, `Relay`, `Rabbit`) mark the parts of
+this picture with a known, deliberate limitation — polling instead of change
+streams, at-least-once delivery, a queue with no consumer-side policy yet —
+spelled out in [Trade-offs / things I'd revisit next](#trade-offs--things-id-revisit-next)
+below. The diagram shows what runs; it does not show what is out of scope —
+there is no retry/circuit-breaker layer in front of Mongo/Redis/RabbitMQ
+beyond what's described above, no caching, no auth/authz, and no multi-tenancy:
+this is a single-machine, single-tenant slice built to demonstrate the
+patterns, not a production deployment.
+
+The static layout behind those boxes:
+
 ```
 src/
 ├── Kernel/                     # Hand-assembled bootstrap: DI container,
@@ -634,6 +700,40 @@ get → domain call → save.
 * `$_ENV`-based configuration in the infrastructure factories is simple but
   bypasses Symfony's `%env()%` parameter resolution; fine for three
   variables, worth revisiting if configuration grows.
+* Exception handling has no unified approach: every HTTP controller and every
+  console command hand-rolls its own `catch` chain mapping domain exceptions to
+  a status code or exit code — `SelectItemController` and `SelectItemCommand`
+  repeat the same four `catch` blocks independently, once per adapter, with no
+  shared exception → {HTTP status, error code, exit code} mapping behind them.
+  A bare `catch (Throwable)` around input decoding also doubles as "this
+  request is malformed", so a genuine bug there is reported as a 400
+  `InvalidRequest` instead of surfacing as one. Adding a new domain exception
+  means remembering to add a matching `catch` to every adapter that can throw
+  it, or it falls through unmapped as a raw 500 (HTTP) or an uncaught exception
+  (console) with no consistent error envelope. A small, centralised mapper (or
+  a Symfony exception listener on the HTTP side) would remove the duplication
+  and the risk of the two adapters drifting out of sync.
+* There is no authentication or authorization on any HTTP endpoint —
+  provisioning, servicing, inserting coins and selecting items are all open
+  POSTs, and the infrastructure runs on its images' defaults (RabbitMQ's
+  `guest/guest`, no Mongo/Redis auth, no TLS anywhere in `docker-compose.yml`).
+  Fine for a local demo; an API-key or JWT boundary in front of the HTTP
+  adapter is the first thing a real deployment would add.
+* `insert-coin` and `select-item` are plain POSTs with no idempotency key,
+  unlike the consuming side: the Sales context's unique index on
+  `sourceEventId` makes a redelivered integration event a silent no-op, but a
+  retried HTTP request (client timeout, proxy retry, double-tap) has no
+  equivalent protection and can double-insert a coin or attempt a double vend.
+  A concurrent write collision on the same machine (Doctrine's optimistic-lock
+  conflict) is not mapped to a client-retryable response either; it surfaces
+  as a raw 500 rather than a 409 the caller could safely retry.
+* Observability is minimal: the only logging is a single
+  `LoggerInterface->error()` call when a domain-event subscriber fails
+  (`MessengerDomainEventBus`), there are no metrics (outbox backlog size,
+  relay lag, consumer lag), and tracing is just reusing the causing domain
+  event's id as `correlationId`. `/health` reports a binary up/down with no
+  deeper signal. Enough to demonstrate the patterns; not enough to see an
+  at-least-once retry storm or a growing DLQ without reading logs by hand.
 * The read-model port still speaks a raw state array; `MachineStateView` is the
   typed projection on top of it. Folding the DTO into the port signature is a
   natural next step once a second projection shape exists.
@@ -656,6 +756,12 @@ get → domain call → save.
   projection always reflects the balance after the attempt. That costs a
   no-op write on `InsufficientFunds` and `OutOfStock`, where the machine's state
   does not actually change.
+* The write model persists current state only (`VendingMachineDocument`),
+  with `pendingEvents` as a transient outbox array that's `$pull`ed once
+  published. Once drained, there is no durable log of what happened to a
+  machine — no replay, no audit trail, no event-sourced rebuild. State-based
+  persistence was the deliberate choice here; event sourcing is a different,
+  bigger trade-off this codebase didn't take on.
 * Integration event delivery is at-least-once: a relay crash between the
   broker's confirm and the outbox removal (or a lost race with a concurrent
   save) republishes a message, so consumers must deduplicate on the envelope
@@ -668,6 +774,20 @@ get → domain call → save.
 * Published messages accumulate in `vending-machine.integration` until the
   consuming slice lands — visible in the management UI, harmless at this
   scale, and worth a queue policy (or actual consumers) before real traffic.
+* Every piece of infrastructure — Mongo, Redis, RabbitMQ, `outbox-relay`,
+  `sales-worker` — runs as a single replica in `docker-compose.yml`; none of
+  it is highly available. The standalone Mongo node is already explained above
+  (change streams need a replica set), but the same single-node shape applies
+  to the broker and both workers, and running two `outbox-relay` replicas
+  today would just mean both polling and racing to publish the same pending
+  entries — harmless, because delivery is already at-least-once, but not a
+  scaling strategy.
+* Mongo indexes (e.g. the unique index on `Sale.sourceEventId`) are ensured
+  lazily, in-process, on first use (`MongoSaleRepository::ensureIndexes()`),
+  rather than through a migration step run once at deploy time; several
+  cold-starting processes would race to create the same index. `GET /sales`
+  also returns every row unpaginated — fine at demo volume, would need
+  cursor-based pagination before real traffic.
 * Two Mago rules are tuned in `mago.toml`: `too-many-methods` is raised and
   skips tests (test classes grow one method per case), and
   `inline-variable-return` is off because its fixer strips the `@var` that

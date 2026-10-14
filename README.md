@@ -359,8 +359,8 @@ src/
 │                                # serializer, AMQP transport + console wiring
 ├── Shared/                     # Cross-aggregate building blocks
 │   ├── Domain/Event/           # DomainEvent + DomainEventBus contracts + EventId
-│   ├── Domain/ValueObject/     # StringInterface + the shared Uuid base (a UUIDv7
-│   │                            # built on symfony/uid); the ids extend it
+│   ├── Domain/ValueObject/     # the shared Uuid base, a UUIDv7 built on
+│   │                            # symfony/uid; the ids extend it
 │   ├── Application/Bus/        # Handler/subscriber markers + CommandBus/QueryBus ports
 │   ├── Application/IntegrationEvent/ # IntegrationEvent base, IntegrationEventBus
 │   │                                # port, IntegrationEventSubscriber marker

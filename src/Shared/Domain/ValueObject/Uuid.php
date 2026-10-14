@@ -22,7 +22,7 @@ use Symfony\Component\Uid\UuidV7;
  * keeps a single, well-tested implementation of UUIDv7 instead of a copy per
  * id. Only the id's own value is exposed; the Symfony type stays inside.
  */
-readonly class Uuid implements StringInterface
+readonly class Uuid
 {
     final protected function __construct(
         private string $value,

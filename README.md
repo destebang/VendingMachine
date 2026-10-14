@@ -231,11 +231,12 @@ Prefer those terms in code, comments and commits.
 ```
 src/
 ├── Kernel/                     # Hand-assembled bootstrap: DI container,
-│                                # HTTP front controller, infra factories.
-│                                # No business logic lives here.
+│   │                            # HTTP front controller, infra factories.
+│   │                            # No business logic lives here.
+│   └── Bus/                     # MessengerQueryBus: the QueryBus adapter
 ├── Shared/                     # Cross-aggregate, framework-free building blocks
 │   ├── Domain/Event/           # DomainEvent + DomainEventBus contracts
-│   └── Application/Bus/        # CommandHandler/QueryHandler markers
+│   └── Application/Bus/        # CommandHandler/QueryHandler markers + QueryBus port
 └── VendingMachine/
     ├── Domain/                 # Pure business logic. No framework, no I/O.
     │   ├── Model/               # Money, Denomination, Product, ChangeDue,
@@ -281,19 +282,24 @@ identical service wiring.
 
 ### CQRS-shaped from day one
 
-A single Symfony Messenger command bus (`config/services.yaml`,
-`command.bus`) is configured with a synchronous, in-memory handlers locator.
-Every use case is a command or query dispatched through it and handled by
-exactly one handler: `ProvisionVendingMachine`, `ServiceVendingMachine`,
-`InsertCoin`, `SelectItem`, `ReturnCoin`, the `GetVendingMachineState` query and
-the `HealthCheck` smoke test all go through it.
+Two Symfony Messenger buses (`config/services.yaml`) carry the two sides, each
+with its own synchronous, in-memory handlers locator. `command.bus` handles the
+write use cases — `ProvisionVendingMachine`, `ServiceVendingMachine`,
+`InsertCoin`, `SelectItem`, `ReturnCoin` and the `HealthCheck` smoke test —
+while `query.bus` handles the read-side `GetVendingMachineState` query.
 
-Handlers self-register: a handler class marked `#[CommandHandler]` (or
-`#[QueryHandler]`) is autoconfigured onto the bus by `App\Kernel\ContainerFactory`,
-so adding a use case is adding the handler class — no hand-written
-message→handler map. Symfony's own `MessengerPass` builds the bus and its
-handlers locator from those tags, and a compiler pass refuses to compile when a
-command or query ends up with zero handlers or more than one.
+Handlers self-register: a handler class marked `#[CommandHandler]` is
+autoconfigured onto `command.bus` and one marked `#[QueryHandler]` onto
+`query.bus` by `App\Kernel\ContainerFactory`, so adding a use case is adding the
+handler class — no hand-written message→handler map. Symfony's own
+`MessengerPass` builds each bus and its handlers locator from those tags, and a
+compiler pass refuses to compile when a command or query ends up with zero
+handlers or more than one.
+
+The read-side driving adapters (`GetVendingMachineController`,
+`GetVendingMachineCommand`) depend on the framework-free `QueryBus` port
+(`ask(object $query): mixed`), not on Messenger; only the
+`App\Kernel\Bus\MessengerQueryBus` adapter knows the framework.
 
 ### Domain events (write-side foundation)
 
@@ -335,9 +341,9 @@ balance.
   concrete rows, never by hardcoding a catalogue. New rules belong on the
   `VendingMachine` aggregate and are rejected with a domain exception.
 * **New channel** — add a new adapter under `Infrastructure/` that
-  dispatches existing commands/queries through the same bus. The HTTP
-  controller and console command are the template: no business logic,
-  only translating input/output.
+  dispatches existing commands through `command.bus` (or queries through the
+  `QueryBus` port). The HTTP controller and console command are the template: no
+  business logic, only translating input/output.
 
 ## Trade-offs / things I'd revisit next
 

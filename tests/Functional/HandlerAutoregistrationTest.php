@@ -33,4 +33,22 @@ final class HandlerAutoregistrationTest extends TestCase
             'MessengerPass must build one handler descriptor per autoconfigured handler.',
         );
     }
+
+    public function test_the_read_side_has_its_own_bus(): void
+    {
+        $container = ContainerFactory::create();
+
+        self::assertTrue(
+            $container->hasDefinition('command.bus.middleware.handle_message'),
+            'The command bus must keep its own middleware.',
+        );
+        self::assertTrue(
+            $container->hasDefinition('query.bus.middleware.handle_message'),
+            'The query bus must have its own middleware.',
+        );
+        self::assertTrue(
+            $container->hasDefinition('App\\Kernel\\Bus\\MessengerQueryBus'),
+            'The QueryBus port must be backed by the Kernel adapter.',
+        );
+    }
 }

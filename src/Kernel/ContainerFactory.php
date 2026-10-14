@@ -49,10 +49,8 @@ final class ContainerFactory
             $definition->addTag('messenger.message_handler', ['bus' => 'command.bus']);
         });
 
-        // The read side still rides the single bus in this slice; the query bus
-        // split retargets this attribute to `query.bus`.
         $container->registerAttributeForAutoconfiguration(QueryHandler::class, static function (ChildDefinition $definition): void {
-            $definition->addTag('messenger.message_handler', ['bus' => 'command.bus']);
+            $definition->addTag('messenger.message_handler', ['bus' => 'query.bus']);
         });
     }
 }

@@ -318,7 +318,24 @@ Every mutation on the `VendingMachine` aggregate records a domain event: a
 readonly, timestamp-free fact carrying the aggregate identity and the full
 resulting state, plus the action's own data (the coin inserted, the item
 vended, the funds returned). Rejections that throw before mutating record
-nothing, and an exact-change rejection records the refund before it throws.
+nothing, and an exact-change rejection records the refund — naming the
+rejected selector code — before it throws.
+
+Every event also carries the two pieces of identity infrastructure cannot
+derive on its own:
+
+- an **event id** (`App\Shared\Domain\Event\EventId`, a UUIDv7 minted when the
+  event is recorded), unique across every event ever recorded, so a store or
+  bus can recognise the same fact when it sees it again; and
+- the **aggregate version** the mutation left the machine at. The aggregate
+  bumps its version exactly once per mutation that records an event, and the
+  repository flushes exactly one recorded mutation per save, so the version
+  stays in step with the optimistic-locking version ODM manages on the
+  document — a stale save is rejected by the lock, not silently reordered.
+
+Each event exposes a `fromPayload()` named constructor, the exact inverse of
+its `payload()`, so a persisted event can be read back into a domain object
+without knowing its shape.
 
 The aggregate does not publish events yet — it releases what it has recorded
 through `releaseEvents()`. The events live in `App\VendingMachine\Domain\Event\`

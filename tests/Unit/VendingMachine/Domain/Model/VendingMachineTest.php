@@ -36,7 +36,8 @@ final class VendingMachineTest extends TestCase
     {
         $state = VendingMachine::create(VendingMachineId::generate(), $this->accepted())->state();
 
-        self::assertSame(0, $state->version);
+        // Provisioning is the machine's first recorded mutation, so it is left at version 1.
+        self::assertSame(1, $state->version);
         self::assertTrue($state->stock->isEmpty());
         self::assertTrue($state->cashReserve->isEmpty());
         self::assertTrue($state->insertedFunds->isEmpty());
@@ -402,6 +403,7 @@ final class VendingMachineTest extends TestCase
         self::assertCount(1, $events);
         self::assertInstanceOf(VendingMachineProvisioned::class, $events[0]);
         self::assertSame($machine->state()->id->toString(), $events[0]->aggregateId());
+        self::assertSame(1, $events[0]->aggregateVersion());
     }
 
     public function test_reconstituting_from_persisted_state_records_no_events(): void
@@ -598,9 +600,16 @@ final class VendingMachineTest extends TestCase
             /** @var InsertedFundsReturnedDueToInsufficientChange $event */
             $event = $events[0];
             self::assertInstanceOf(InsertedFundsReturnedDueToInsufficientChange::class, $event);
+            self::assertSame('WATER', $event->selectorCode);
             self::assertSame([25, 25, 25, 10, 10, 5], $event->returnedFunds->denominationsInCents());
             self::assertSame(0, $event->state->insertedFunds->amount()->amountInCents());
             self::assertSame(10, $event->state->stock->quantityOf('WATER'));
+
+            // The rejection is a recorded mutation: six inserts plus the
+            // recorded refund leave the machine at version 7, and the event
+            // names exactly that version.
+            self::assertSame(7, $event->aggregateVersion());
+            self::assertSame(7, $machine->state()->version);
         }
     }
 

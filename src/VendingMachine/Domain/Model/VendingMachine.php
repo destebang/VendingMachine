@@ -9,6 +9,7 @@ use App\VendingMachine\Domain\Event\CoinInserted;
 use App\VendingMachine\Domain\Event\InsertedFundsReturned;
 use App\VendingMachine\Domain\Event\InsertedFundsReturnedDueToInsufficientChange;
 use App\VendingMachine\Domain\Event\ItemVended;
+use App\VendingMachine\Domain\Event\VendingMachineEvent;
 use App\VendingMachine\Domain\Event\VendingMachineProvisioned;
 use App\VendingMachine\Domain\Event\VendingMachineServiced;
 use App\VendingMachine\Domain\Exception\InsufficientChangeAvailableException;
@@ -33,6 +34,14 @@ use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
  * Every mutation records a domain event describing it. The aggregate does not
  * publish them: it only releases what it has recorded, so the application
  * layer can decide when and how to publish.
+ *
+ * The version is the aggregate's own optimistic-concurrency counter, and it
+ * advances in lockstep with the events: recording a mutation and advancing
+ * the version are one act inside `record()`, so every event names the version
+ * the machine was left at. One mutation per flush keeps it in step with the
+ * version the repository's persistence layer manages. Rejections that throw
+ * before mutating change nothing and record nothing, so the version stands
+ * still.
  */
 final class VendingMachine
 {
@@ -56,7 +65,7 @@ final class VendingMachine
     /**
      * A brand-new, unstocked machine accepting the given denominations: empty
      * stock, empty reserve, no inserted funds. Records the machine's first
-     * event.
+     * event and leaves the machine at version 1.
      */
     public static function create(VendingMachineId $id, AcceptedDenominations $acceptedDenominations): self
     {
@@ -68,7 +77,9 @@ final class VendingMachine
             CashReserve::empty(),
             0,
         );
-        $vendingMachine->record(new VendingMachineProvisioned($id, $vendingMachine->state()));
+        $vendingMachine->record(
+            static fn(): VendingMachineProvisioned => new VendingMachineProvisioned($id, $vendingMachine->state()),
+        );
 
         return $vendingMachine;
     }
@@ -123,7 +134,7 @@ final class VendingMachine
 
         $this->insertedFunds = $this->insertedFunds->plus($coin);
 
-        $this->record(new CoinInserted($this->id, $this->state(), $coin));
+        $this->record(fn(): CoinInserted => new CoinInserted($this->id, $this->state(), $coin));
     }
 
     /**
@@ -140,7 +151,9 @@ final class VendingMachine
         $returnedFunds = $this->insertedFunds;
         $this->insertedFunds = InsertedFunds::none();
 
-        $this->record(new InsertedFundsReturned($this->id, $this->state(), $returnedFunds));
+        $this->record(
+            fn(): InsertedFundsReturned => new InsertedFundsReturned($this->id, $this->state(), $returnedFunds),
+        );
 
         return $returnedFunds;
     }
@@ -163,7 +176,8 @@ final class VendingMachine
      *   returns every inserted coin, resetting the balance to zero.
      *
      * A success records `ItemVended`, and an exact-change rejection records
-     * `InsertedFundsReturnedDueToInsufficientChange` before it throws. The
+     * `InsertedFundsReturnedDueToInsufficientChange` (carrying the rejected
+     * selector code) before it throws. The
      * `OutOfStock` and `InsufficientFunds` rejections throw before any mutation
      * and record nothing.
      */
@@ -192,7 +206,14 @@ final class VendingMachine
             $returnedFunds = $this->insertedFunds;
             $this->insertedFunds = InsertedFunds::none();
 
-            $this->record(new InsertedFundsReturnedDueToInsufficientChange($this->id, $this->state(), $returnedFunds));
+            $this->record(
+                fn(): InsertedFundsReturnedDueToInsufficientChange => new InsertedFundsReturnedDueToInsufficientChange(
+                    $this->id,
+                    $this->state(),
+                    $returnedFunds,
+                    $selectorCode,
+                ),
+            );
 
             throw InsufficientChangeAvailableException::forAmount($changeDue);
         }
@@ -204,7 +225,7 @@ final class VendingMachine
         $this->insertedFunds = InsertedFunds::none();
 
         $vendedItem = new VendedItem($selectorCode, $price, $change);
-        $this->record(new ItemVended($this->id, $this->state(), $vendedItem));
+        $this->record(fn(): ItemVended => new ItemVended($this->id, $this->state(), $vendedItem));
 
         return $vendedItem;
     }
@@ -229,7 +250,7 @@ final class VendingMachine
         $this->cashReserve = $cashReserve;
         $this->acceptedDenominations = $acceptedDenominations;
 
-        $this->record(new VendingMachineServiced($this->id, $this->state()));
+        $this->record(fn(): VendingMachineServiced => new VendingMachineServiced($this->id, $this->state()));
     }
 
     /**
@@ -257,8 +278,19 @@ final class VendingMachine
         return !$this->insertedFunds->isEmpty();
     }
 
-    private function record(DomainEvent $event): void
+    /**
+     * Records a domain event for the mutation just applied. Recording and the
+     * version advance are one act: the version is bumped first, and the factory
+     * builds the event only then — so the event's snapshot carries the version
+     * the machine was left at, and the bump cannot be forgotten. One recorded
+     * mutation per flush keeps the aggregate in step with the version the
+     * persistence layer manages for optimistic locking.
+     *
+     * @param callable(): VendingMachineEvent $eventFactory
+     */
+    private function record(callable $eventFactory): void
     {
-        $this->recordedEvents[] = $event;
+        $this->version++;
+        $this->recordedEvents[] = $eventFactory();
     }
 }

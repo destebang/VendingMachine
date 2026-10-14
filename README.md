@@ -349,6 +349,72 @@ Prefer those terms in code, comments and commits.
 
 ## Architecture
 
+The runtime picture — two bounded contexts, the write/read split inside
+`VendingMachine`, and the outbox → relay → broker → consumer chain that
+connects them to `Sales`:
+
+```mermaid
+flowchart TB
+    Client["HTTP client / CLI"]
+
+    subgraph VM["VendingMachine context"]
+        direction TB
+        CmdBus["CommandBus"]
+        QryBus["QueryBus"]
+        Handlers["Use case handlers<br/>(Provision / Service / InsertCoin /<br/>SelectItem / ReturnCoin)"]
+        Aggregate["VendingMachine aggregate<br/>(Domain, no I/O)"]
+        Translator["IntegrationEventTranslator<br/>(Domain event → integration event)"]
+        Projector["ReadModel Projector<br/>(#[DomainEventSubscriber])"]
+        Mongo[("MongoDB<br/>write model + embedded outbox")]
+        Redis[("Redis<br/>read model")]
+    end
+
+    subgraph Async["Asynchronous delivery"]
+        direction TB
+        Relay["outbox-relay<br/>(polls ~500ms)"]
+        Rabbit[("RabbitMQ<br/>vending_machine.integration")]
+    end
+
+    subgraph Sales["Sales context (depends only on the published contract)"]
+        direction TB
+        Worker["sales-worker<br/>(messenger:consume)"]
+        SalesHandler["RegisterSaleHandler"]
+        SalesRepo[("MongoDB<br/>sales, unique index on sourceEventId")]
+        DLQ["sales.item_vended.dlq"]
+    end
+
+    Client --> CmdBus
+    Client --> QryBus
+    CmdBus --> Handlers
+    QryBus -. "reads only" .-> Redis
+    Handlers --> Aggregate
+    Aggregate -- "save (version-checked)" --> Mongo
+    Aggregate -. "domain events<br/>(sync, in-process)" .-> Projector
+    Projector --> Redis
+    Mongo -- "pendingEvents<br/>(same atomic write)" --> Relay
+    Relay --> Translator
+    Translator -- "ItemVendedV1<br/>(JSON envelope)" --> Rabbit
+    Rabbit --> Worker
+    Worker --> SalesHandler
+    SalesHandler --> SalesRepo
+    Worker -. "retries exhausted" .-> DLQ
+
+    classDef tradeoff stroke-dasharray: 4 3,stroke:#b35900,color:#b35900;
+    class Relay,Rabbit,Mongo tradeoff;
+```
+
+Dashed, orange-outlined nodes (`Mongo`, `Relay`, `Rabbit`) mark the parts of
+this picture with a known, deliberate limitation — polling instead of change
+streams, at-least-once delivery, a queue with no consumer-side policy yet —
+spelled out in [Trade-offs / things I'd revisit next](#trade-offs--things-id-revisit-next)
+below. The diagram shows what runs; it does not show what is out of scope —
+there is no retry/circuit-breaker layer in front of Mongo/Redis/RabbitMQ
+beyond what's described above, no caching, no auth/authz, and no multi-tenancy:
+this is a single-machine, single-tenant slice built to demonstrate the
+patterns, not a production deployment.
+
+The static layout behind those boxes:
+
 ```
 src/
 ├── Kernel/                     # Hand-assembled bootstrap: DI container,

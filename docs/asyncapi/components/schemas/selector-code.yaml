@@ -1,0 +1,7 @@
+title: Selector code
+description: >-
+  The short code a customer enters to choose a product. Within a machine it
+  identifies exactly one loaded product, so a consumer uses it together with
+  the machine id to look the product up.
+type: string
+minLength: 1

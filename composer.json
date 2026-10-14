@@ -23,6 +23,7 @@
     },
     "require-dev": {
         "carthage-software/mago": "^1.56",
+        "opis/json-schema": "^2.6",
         "phpunit/phpunit": "^11.4"
     },
     "autoload": {

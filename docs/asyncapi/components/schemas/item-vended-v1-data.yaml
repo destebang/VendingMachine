@@ -1,0 +1,27 @@
+title: Item vended (v1) data
+description: >-
+  The `data` payload of a `vending_machine.item_vended.v1` message: which
+  machine sold what, the price paid and the change handed back. It carries no
+  domain objects and no internal state, so a consumer can depend on it without
+  coupling to the vending machine's model.
+type: object
+additionalProperties: false
+required:
+  - vendingMachineId
+  - selectorCode
+  - priceInCents
+  - changeInCents
+properties:
+  vendingMachineId:
+    type: string
+    format: uuid
+    description: The machine that vended the item.
+  selectorCode:
+    $ref: './selector-code.yaml'
+  priceInCents:
+    $ref: './cents.yaml'
+  changeInCents:
+    type: array
+    description: The coins handed back as change, largest first.
+    items:
+      $ref: './cents.yaml'

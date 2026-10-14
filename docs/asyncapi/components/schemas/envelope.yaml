@@ -1,0 +1,53 @@
+title: Integration event envelope
+description: >-
+  The stable JSON envelope every integration message of this context travels
+  in, whatever the message type. The `data` object is the message's own
+  payload; everything around it is transport identity a consumer can rely on
+  across versions.
+type: object
+additionalProperties: false
+required:
+  - id
+  - type
+  - source
+  - occurredAt
+  - aggregateId
+  - aggregateVersion
+  - correlationId
+  - data
+properties:
+  id:
+    type: string
+    format: uuid
+    description: >-
+      The message identity — the id of the domain event that caused it. Unique
+      across every message ever published; delivery is at-least-once, so a
+      consumer deduplicates on this.
+  type:
+    type: string
+    description: >-
+      The message type, e.g. `vending_machine.item_vended.v1`. Also the routing
+      key the message is published under.
+  source:
+    type: string
+    description: The context that publishes the message.
+  occurredAt:
+    type: string
+    format: date-time
+    description: When the recorded fact was persisted, as an RFC 3339 timestamp.
+  aggregateId:
+    type: string
+    format: uuid
+    description: The aggregate the event belongs to.
+  aggregateVersion:
+    type: integer
+    minimum: 1
+    description: >-
+      The aggregate's version once the recorded mutation was applied, so a
+      consumer can order the messages of one aggregate.
+  correlationId:
+    type: string
+    description: Correlates the message back to the cause of the work.
+  data:
+    type: object
+    description: The message's own payload.

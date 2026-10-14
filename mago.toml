@@ -47,8 +47,8 @@ layering-reason = "Outer layers may depend on inner layers, never the reverse."
 
 [[guard.perimeter.rules]]
 namespace = "App\\Shared\\Domain\\"
-permit = ["@self", "@native"]
-reason = "The shared Domain kernel may only use itself and PHP built-ins."
+permit = ["@self", "@native", "Symfony\\Component\\Uid\\**"]
+reason = "The shared Domain kernel may use itself, PHP built-ins, and the Symfony Uid component the shared Uuid value object is built on."
 
 [[guard.perimeter.rules]]
 namespace = "App\\Shared\\Application\\"
@@ -68,8 +68,8 @@ reason = "Shared infrastructure adapters implement the shared ports with framewo
 
 [[guard.perimeter.rules]]
 namespace = "App\\VendingMachine\\Domain\\"
-permit = ["@self", "@native", "App\\Shared\\Domain\\Event\\**"]
-reason = "The Domain layer may only use itself, the shared Domain event contracts and PHP built-ins."
+permit = ["@self", "@native", "App\\Shared\\Domain\\Event\\**", "App\\Shared\\Domain\\ValueObject\\**"]
+reason = "The Domain layer may only use itself, the shared Domain event and value-object contracts and PHP built-ins."
 
 [[guard.perimeter.rules]]
 namespace = "App\\VendingMachine\\Application\\"
@@ -93,8 +93,8 @@ reason = "Infrastructure adapters may use framework and driver libraries, and th
 
 [[guard.perimeter.rules]]
 namespace = "App\\Sales\\Domain\\"
-permit = ["@self", "@native"]
-reason = "The Sales Domain layer may only use itself and PHP built-ins."
+permit = ["@self", "@native", "App\\Shared\\Domain\\ValueObject\\**"]
+reason = "The Sales Domain layer may only use itself, the shared Domain value-object contracts and PHP built-ins."
 
 [[guard.perimeter.rules]]
 namespace = "App\\Sales\\Application\\"

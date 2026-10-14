@@ -700,6 +700,19 @@ get → domain call → save.
 * `$_ENV`-based configuration in the infrastructure factories is simple but
   bypasses Symfony's `%env()%` parameter resolution; fine for three
   variables, worth revisiting if configuration grows.
+* Exception handling has no unified approach: every HTTP controller and every
+  console command hand-rolls its own `catch` chain mapping domain exceptions to
+  a status code or exit code — `SelectItemController` and `SelectItemCommand`
+  repeat the same four `catch` blocks independently, once per adapter, with no
+  shared exception → {HTTP status, error code, exit code} mapping behind them.
+  A bare `catch (Throwable)` around input decoding also doubles as "this
+  request is malformed", so a genuine bug there is reported as a 400
+  `InvalidRequest` instead of surfacing as one. Adding a new domain exception
+  means remembering to add a matching `catch` to every adapter that can throw
+  it, or it falls through unmapped as a raw 500 (HTTP) or an uncaught exception
+  (console) with no consistent error envelope. A small, centralised mapper (or
+  a Symfony exception listener on the HTTP side) would remove the duplication
+  and the risk of the two adapters drifting out of sync.
 * The read-model port still speaks a raw state array; `MachineStateView` is the
   typed projection on top of it. Folding the DTO into the port signature is a
   natural next step once a second projection shape exists.

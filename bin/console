@@ -7,11 +7,14 @@ use App\Kernel\ContainerFactory;
 use App\VendingMachine\Infrastructure\Console\GetVendingMachineCommand;
 use App\VendingMachine\Infrastructure\Console\HealthCheckCommand;
 use App\VendingMachine\Infrastructure\Console\InsertCoinCommand;
+use App\VendingMachine\Infrastructure\Console\OutboxRelayCommand;
 use App\VendingMachine\Infrastructure\Console\ProvisionVendingMachineCommand;
 use App\VendingMachine\Infrastructure\Console\ReturnCoinCommand;
 use App\VendingMachine\Infrastructure\Console\SelectItemCommand;
 use App\VendingMachine\Infrastructure\Console\ServiceVendingMachineCommand;
 use Symfony\Component\Console\Application;
+use Symfony\Component\Messenger\Command\ConsumeMessagesCommand;
+use Symfony\Component\Messenger\Command\SetupTransportsCommand;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 
@@ -27,6 +30,10 @@ foreach ([
     SelectItemCommand::class,
     ReturnCoinCommand::class,
     GetVendingMachineCommand::class,
+    OutboxRelayCommand::class,
+    // Symfony Messenger's own commands, wired by hand (no framework-bundle).
+    ConsumeMessagesCommand::class,
+    SetupTransportsCommand::class,
 ] as $command) {
     $application->add($container->get($command));
 }

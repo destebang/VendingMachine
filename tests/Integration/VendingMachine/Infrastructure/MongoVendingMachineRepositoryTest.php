@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace App\Tests\Integration\VendingMachine\Infrastructure;
 
 use App\Kernel\DocumentManagerFactory;
+use App\Shared\Domain\Event\EventId;
 use App\Shared\Infrastructure\EventBus\DomainEventCollector;
+use App\VendingMachine\Domain\Event\CoinInserted;
+use App\VendingMachine\Domain\Event\VendingMachineProvisioned;
 use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
 use App\VendingMachine\Domain\Model\AcceptedDenominations;
 use App\VendingMachine\Domain\Model\CashReserve;
@@ -17,6 +20,7 @@ use App\VendingMachine\Domain\Model\Stock;
 use App\VendingMachine\Domain\Model\VendingMachine;
 use App\VendingMachine\Domain\Model\VendingMachineId;
 use App\VendingMachine\Infrastructure\Persistence\Mongo\MongoVendingMachineRepository;
+use App\VendingMachine\Infrastructure\Persistence\Mongo\VendingMachineDocument;
 use Doctrine\ODM\MongoDB\LockException;
 use PHPUnit\Framework\TestCase;
 
@@ -102,6 +106,57 @@ final class MongoVendingMachineRepositoryTest extends TestCase
         $repository->save($machine);
 
         self::assertSame(2, $repository->get($id)->state()->version);
+    }
+
+    public function test_a_save_appends_the_recorded_events_to_the_outbox_in_the_same_write(): void
+    {
+        $documentManager = DocumentManagerFactory::create();
+        $repository = new MongoVendingMachineRepository($documentManager, new DomainEventCollector());
+        $id = VendingMachineId::generate();
+
+        $machine = VendingMachine::create($id, AcceptedDenominations::fromCents([5, 10, 25, 100]));
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+        $repository->save($machine);
+
+        /** @var array{insertedDenominationsInCents: list<int>, pendingEvents: list<array{eventId: string, type: string, payload: array<string, mixed>, aggregateVersion: int, occurredAt: string}>}|null $document */
+        $document = $documentManager
+            ->getDocumentCollection(VendingMachineDocument::class)
+            ->findOne(['_id' => $id->toString()]);
+
+        self::assertNotNull($document);
+
+        // The state change and its outbox entries land in the very same
+        // document write: nothing is persisted without the other.
+        self::assertSame([25], $document['insertedDenominationsInCents']);
+
+        $pending = $document['pendingEvents'];
+
+        self::assertCount(2, $pending);
+
+        [$provisioned, $coinInserted] = $pending;
+
+        self::assertSame(VendingMachineProvisioned::class, $provisioned['type']);
+        self::assertSame(1, $provisioned['aggregateVersion']);
+        self::assertSame(CoinInserted::class, $coinInserted['type']);
+        self::assertSame(2, $coinInserted['aggregateVersion']);
+
+        /** @var array{denomination: array{amountInCents: int}} $coinInsertedPayload */
+        $coinInsertedPayload = $coinInserted['payload'];
+
+        self::assertSame(25, $coinInsertedPayload['denomination']['amountInCents']);
+
+        // Every entry carries the identity the relay needs: a unique event id
+        // (the future envelope id) and the write-time `occurredAt`.
+        self::assertNotSame($provisioned['eventId'], $coinInserted['eventId']);
+        foreach ($pending as $entry) {
+            self::assertSame($entry['eventId'], EventId::fromString($entry['eventId'])->toString());
+            $occurredAt = \DateTimeImmutable::createFromFormat(\DateTimeInterface::RFC3339, $entry['occurredAt']);
+            self::assertNotFalse($occurredAt);
+        }
+
+        // The events were handed out exactly once: the aggregate holds none
+        // after the save.
+        self::assertSame([], $machine->releaseEvents());
     }
 
     public function test_a_stale_save_is_rejected_by_the_optimistic_lock(): void

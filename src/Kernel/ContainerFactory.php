@@ -8,6 +8,8 @@ use App\Kernel\DependencyInjection\SingleHandlerPerMessagePass;
 use App\Shared\Application\Bus\Attribute\CommandHandler;
 use App\Shared\Application\Bus\Attribute\DomainEventSubscriber;
 use App\Shared\Application\Bus\Attribute\QueryHandler;
+use App\Shared\Application\IntegrationEvent\IntegrationEvent;
+use App\Shared\Application\IntegrationEvent\IntegrationEventSubscriber;
 use App\Shared\Domain\Event\DomainEvent;
 use ReflectionClass;
 use ReflectionMethod;
@@ -47,10 +49,10 @@ final class ContainerFactory
 
     /**
      * Turns the framework-free handler markers into the Messenger tag, so a
-     * use case is wired by adding its handler class alone. A domain event
+     * use case is wired by adding its handler class alone. An event
      * subscriber is wired by adding its subscriber class alone too: every
-     * public method that accepts a domain event is tagged onto
-     * `domain_event.bus`, and an event may have any number of subscribers.
+     * public method that accepts an event is tagged onto the events' bus, and
+     * an event may have any number of subscribers.
      */
     private static function registerHandlerAttributes(ContainerBuilder $container): void
     {
@@ -62,11 +64,39 @@ final class ContainerFactory
             $definition->addTag('messenger.message_handler', ['bus' => 'query.bus']);
         });
 
-        $container->registerAttributeForAutoconfiguration(DomainEventSubscriber::class, static function (
+        self::registerEventSubscriberAttribute(
+            $container,
+            DomainEventSubscriber::class,
+            DomainEvent::class,
+            'domain_event.bus',
+        );
+        self::registerEventSubscriberAttribute(
+            $container,
+            IntegrationEventSubscriber::class,
+            IntegrationEvent::class,
+            'integration.bus',
+        );
+    }
+
+    /**
+     * Tags every public single-event method of a marked subscriber onto the
+     * events' bus: domain event subscribers onto `domain_event.bus`,
+     * integration event subscribers onto `integration.bus`.
+     *
+     * @param class-string $attribute the marker attribute
+     * @param class-string $eventInterface the event type methods must accept
+     */
+    private static function registerEventSubscriberAttribute(
+        ContainerBuilder $container,
+        string $attribute,
+        string $eventInterface,
+        string $bus,
+    ): void {
+        $container->registerAttributeForAutoconfiguration($attribute, static function (
             ChildDefinition $definition,
-            DomainEventSubscriber $attribute,
+            object $attributeInstance,
             Reflector $reflector,
-        ): void {
+        ) use ($eventInterface, $bus): void {
             // The marker targets classes, so the reflector is the class itself.
             if (!$reflector instanceof ReflectionClass) {
                 return;
@@ -84,12 +114,12 @@ final class ContainerFactory
                     continue;
                 }
 
-                if (!is_a($eventType->getName(), DomainEvent::class, allow_string: true)) {
+                if (!is_a($eventType->getName(), $eventInterface, allow_string: true)) {
                     continue;
                 }
 
                 $definition->addTag('messenger.message_handler', [
-                    'bus' => 'domain_event.bus',
+                    'bus' => $bus,
                     'method' => $method->getName(),
                 ]);
             }

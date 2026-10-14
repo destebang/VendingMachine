@@ -77,3 +77,17 @@ _Avoid_: restock, refill, fill, replenish
 **Money**:
 An amount of currency held in integer minor units (cents).
 _Avoid_: price, amount (when a distinct type is meant)
+
+**Integration event**:
+A versioned message published to other contexts (`...v1`), carrying a small
+primitive payload. A separate class from the domain event that caused it —
+domain events are internal facts, free to change with the model; integration
+events are contracts, stable under change. They travel on their own,
+asynchronous bus and are delivered at least once.
+_Avoid_: domain event (when crossing contexts), notification, message
+
+**Published language**:
+The set of integration events a context exposes to the others, and the JSON
+envelope they travel in. Public on purpose: it changes only deliberately, and
+the translator is the only code that may see both it and the domain.
+_Avoid_: public API, event schema, contract

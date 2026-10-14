@@ -4,10 +4,11 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
         unzip \
+        librabbitmq-dev \
         libssl-dev \
         libzip-dev \
-    && pecl install mongodb \
-    && docker-php-ext-enable mongodb \
+    && pecl install mongodb amqp \
+    && docker-php-ext-enable mongodb amqp \
     && docker-php-ext-install zip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

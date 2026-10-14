@@ -7,12 +7,14 @@ services:
       MONGO_URI: mongodb://mongodb:27017
       MONGO_DB: vending
       REDIS_URL: redis://redis:6379/0
+      MESSENGER_TRANSPORT_DSN: amqp://guest:guest@rabbitmq:5672/%2f
     volumes:
       - .:/app
       - vendor:/app/vendor
     depends_on:
       - mongodb
       - redis
+      - rabbitmq
 
   mongodb:
     image: mongo:7
@@ -26,6 +28,38 @@ services:
     ports:
       - "6379:6379"
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # Management UI (guest/guest)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+  # Polls the write-side documents for pending outbox entries and publishes
+  # them as integration events to RabbitMQ.
+  outbox-relay:
+    build: .
+    environment:
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DB: vending
+      MESSENGER_TRANSPORT_DSN: amqp://guest:guest@rabbitmq:5672/%2f
+    volumes:
+      - .:/app
+      - vendor:/app/vendor
+    depends_on:
+      mongodb:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    command: ["php", "bin/console", "app:outbox:relay"]
+
 volumes:
   mongo-data:
+  rabbitmq-data:
   vendor:

@@ -14,6 +14,7 @@ use Doctrine\ODM\MongoDB\Mapping\Annotations as ODM;
  * translates between the two.
  */
 #[ODM\Document(collection: 'vending_machines')]
+#[ODM\Index(keys: ['pendingEvents.eventId' => 'asc'])]
 class VendingMachineDocument
 {
     #[ODM\Id(strategy: 'none', type: 'string')]
@@ -61,6 +62,19 @@ class VendingMachineDocument
      */
     #[ODM\Field(type: 'raw')]
     public array $cashReserve = [];
+
+    /**
+     * The embedded outbox: the domain events recorded by the last save(s),
+     * waiting for the relay to publish them as integration events. Written in
+     * the same flush as the state change, so a state transition and its
+     * outbox entries are atomic. The multikey index lets the relay find
+     * documents with pending events cheaply and `$pull` each published entry
+     * by its `eventId`.
+     *
+     * @var list<array{eventId: string, type: string, payload: array<string, mixed>, aggregateVersion: int, occurredAt: string}>
+     */
+    #[ODM\Field(type: 'raw')]
+    public array $pendingEvents = [];
 
     public function __construct(string $id, int $version = 0)
     {

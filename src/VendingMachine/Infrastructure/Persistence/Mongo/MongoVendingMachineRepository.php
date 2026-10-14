@@ -22,9 +22,15 @@ use Doctrine\ODM\MongoDB\DocumentManager;
  * ODM. Translates between the persistence-agnostic `VendingMachine`
  * aggregate and the Mongo-specific `VendingMachineDocument`.
  *
- * Once a save has committed, the events the aggregate recorded are released
- * to the collector; the command-bus middleware publishes them when the
- * command is done, for every outcome.
+ * Every save does two things with the events the aggregate recorded:
+ *
+ * - Before the flush, they are appended to the document's `pendingEvents`
+ *   (the embedded outbox), so the state change and its outbox entries are
+ *   one atomic single-document write; the polling relay publishes them as
+ *   integration events asynchronously.
+ * - Once the flush has committed, they are released to the collector; the
+ *   command-bus middleware publishes them on the synchronous domain bus
+ *   when the command is done, for every outcome.
  */
 final class MongoVendingMachineRepository implements VendingMachineRepository
 {
@@ -77,12 +83,30 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
         $document->stock = self::stockToDocument($state->stock->products());
         $document->cashReserve = self::cashReserveToDocument($state->cashReserve->counts());
 
+        // Embedded outbox: the recorded events become pending outbox entries
+        // in the same document write, so the state change and the events it
+        // must publish are persisted atomically — no two-phase commit, no
+        // event lost between the write and the publish. `occurredAt` is a
+        // storage concern, so it is stamped here, not by the aggregate.
+        $events = $vendingMachine->releaseEvents();
+        $persistedAt = new \DateTimeImmutable();
+
+        foreach ($events as $event) {
+            $document->pendingEvents[] = [
+                'eventId' => $event->eventId(),
+                'type' => $event::class,
+                'payload' => $event->payload(),
+                'aggregateVersion' => $event->aggregateVersion(),
+                'occurredAt' => $persistedAt->format(\DateTimeInterface::RFC3339),
+            ];
+        }
+
         $this->documentManager->flush();
 
         // Only a committed write releases events: a flush that throws (e.g. an
         // optimistic-lock rejection) collects nothing, so a fact that never
         // persisted is never published.
-        $this->eventCollector->collect(...$vendingMachine->releaseEvents());
+        $this->eventCollector->collect(...$events);
     }
 
     /**

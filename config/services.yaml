@@ -9,6 +9,8 @@ parameters:
         - { id: query.bus.middleware.handle_message }
     domain_event.bus.middleware:
         - { id: domain_event.bus.middleware.handle_message }
+    integration.bus.middleware:
+        - { id: integration.bus.middleware.handle_message }
 
 services:
     _defaults:
@@ -141,4 +143,58 @@ services:
         # Replaced by MessengerPass with the generated handlers locator.
         arguments:
             - []
+
+    # --- Integration bus (Messenger over AMQP, async) -----------------------
+    # The published language rides its own bus, separate from the synchronous
+    # domain bus: integration events are separate classes with small primitive
+    # payloads, published to the durable topic exchange `vending_machine.integration`
+    # with the event type as the routing key. The outbox relay is the only
+    # publisher; `#[IntegrationEventSubscriber]` consumers land in a later
+    # slice and will be autoconfigured onto `integration.bus`.
+    App\Shared\Application\IntegrationEvent\IntegrationEventBus:
+        alias: App\Kernel\IntegrationEvent\MessengerIntegrationEventBus
+
+    App\Kernel\IntegrationEvent\MessengerIntegrationEventBus:
+        arguments:
+            $transport: '@messenger.transport.integration_events'
+
+    App\Kernel\IntegrationEvent\JsonEnvelopeSerializer:
+        arguments:
+            # Envelope type => event class: how a consumed message is decoded
+            # back into a typed event without a PHP class name on the wire.
+            $eventTypes:
+                'vending_machine.item_vended.v1': 'App\VendingMachine\Application\IntegrationEvent\ItemVendedV1'
+
+    messenger.transport.integration_events:
+        class: Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpTransport
+        factory: ['App\Kernel\IntegrationEvent\AmqpTransportFactory', 'create']
+
+    integration.bus:
+        class: Symfony\Component\Messenger\MessageBus
+        tags: [messenger.bus]
+        # Replaced by MessengerPass with the middleware list from the
+        # `integration.bus.middleware` parameter.
+        arguments:
+            - []
+
+    integration.bus.middleware.handle_message:
+        class: Symfony\Component\Messenger\Middleware\HandleMessageMiddleware
+        # Replaced by MessengerPass with the generated handlers locator.
+        arguments:
+            - []
+
+    # Symfony Messenger's own console commands, built by hand and pulled from
+    # the container in bin/console.
+    Symfony\Component\Messenger\Command\ConsumeMessagesCommand:
+        factory: ['App\Kernel\IntegrationEvent\MessengerCommandsFactory', 'createConsumeMessagesCommand']
+        arguments:
+            - '@integration.bus'
+            - '@messenger.transport.integration_events'
+        public: true
+
+    Symfony\Component\Messenger\Command\SetupTransportsCommand:
+        factory: ['App\Kernel\IntegrationEvent\MessengerCommandsFactory', 'createSetupTransportsCommand']
+        arguments:
+            - '@messenger.transport.integration_events'
+        public: true
 

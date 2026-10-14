@@ -240,8 +240,9 @@ Formatting, linting, static analysis and architectural guards are handled by
 [Mago](https://mago.carthage.software/), configured in [`mago.toml`](./mago.toml).
 The guard enforces the hexagonal layering (Domain ← Application ←
 Infrastructure), keeps Symfony, Doctrine, MongoDB and Predis out of the inner
-layers, and pins naming and modifier conventions on controllers, commands,
-repositories, domain models and domain exceptions.
+layers (the shared `Uuid` value object is the one deliberate exception, built
+on the `symfony/uid` component), and pins naming and modifier conventions on
+controllers, commands, repositories, domain models and domain exceptions.
 
 Run the four checks through Composer (or `vendor/bin/mago <tool>` directly):
 
@@ -356,8 +357,10 @@ src/
 │   ├── Bus/                     # MessengerCommandBus / MessengerQueryBus adapters
 │   └── IntegrationEvent/        # Messenger AMQP integration bus, JSON envelope
 │                                # serializer, AMQP transport + console wiring
-├── Shared/                     # Cross-aggregate, framework-free building blocks
-│   ├── Domain/Event/           # DomainEvent + DomainEventBus contracts
+├── Shared/                     # Cross-aggregate building blocks
+│   ├── Domain/Event/           # DomainEvent + DomainEventBus contracts + EventId
+│   ├── Domain/ValueObject/     # the shared Uuid base, a UUIDv7 built on
+│   │                            # symfony/uid; the ids extend it
 │   ├── Application/Bus/        # Handler/subscriber markers + CommandBus/QueryBus ports
 │   ├── Application/IntegrationEvent/ # IntegrationEvent base, IntegrationEventBus
 │   │                                # port, IntegrationEventSubscriber marker
@@ -462,9 +465,10 @@ rejected selector code — before it throws.
 Every event also carries the two pieces of identity infrastructure cannot
 derive on its own:
 
-- an **event id** (`App\Shared\Domain\Event\EventId`, a UUIDv7 minted when the
-  event is recorded), unique across every event ever recorded, so a store or
-  bus can recognise the same fact when it sees it again; and
+- an **event id** (`App\Shared\Domain\Event\EventId`, a UUIDv7 minted through
+  the shared `Uuid` base when the event is recorded), unique across every event
+  ever recorded, so a store or bus can recognise the same fact when it sees it
+  again; and
 - the **aggregate version** the mutation left the machine at. The aggregate
   bumps its version exactly once per mutation that records an event, and the
   repository flushes exactly one recorded mutation per save, so the version

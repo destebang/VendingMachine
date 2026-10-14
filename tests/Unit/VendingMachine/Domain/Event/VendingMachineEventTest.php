@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\VendingMachine\Domain\Event;
 
+use App\Shared\Domain\Event\EventId;
 use App\VendingMachine\Domain\Event\CoinInserted;
 use App\VendingMachine\Domain\Event\InsertedFundsReturned;
 use App\VendingMachine\Domain\Event\InsertedFundsReturnedDueToInsufficientChange;
 use App\VendingMachine\Domain\Event\ItemVended;
+use App\VendingMachine\Domain\Event\VendingMachineEvent;
 use App\VendingMachine\Domain\Event\VendingMachineProvisioned;
 use App\VendingMachine\Domain\Event\VendingMachineServiced;
 use App\VendingMachine\Domain\Model\AcceptedDenominations;
@@ -25,29 +27,36 @@ use PHPUnit\Framework\TestCase;
 
 final class VendingMachineEventTest extends TestCase
 {
-    public function test_provisioned_payload_carries_the_full_resulting_state(): void
+    public function test_provisioned_payload_carries_the_event_id_and_the_full_resulting_state(): void
     {
         $state = $this->state();
         $event = new VendingMachineProvisioned($state->id, $state);
 
-        self::assertSame(['state' => $this->expectedStateSnapshot()], $event->payload());
+        self::assertSame(
+            ['eventId' => $event->eventId->toString(), 'state' => $this->expectedStateSnapshot()],
+            $event->payload(),
+        );
     }
 
-    public function test_serviced_payload_carries_the_full_resulting_state(): void
+    public function test_serviced_payload_carries_the_event_id_and_the_full_resulting_state(): void
     {
         $state = $this->state();
         $event = new VendingMachineServiced($state->id, $state);
 
-        self::assertSame(['state' => $this->expectedStateSnapshot()], $event->payload());
+        self::assertSame(
+            ['eventId' => $event->eventId->toString(), 'state' => $this->expectedStateSnapshot()],
+            $event->payload(),
+        );
     }
 
-    public function test_coin_inserted_payload_carries_the_denomination_and_state(): void
+    public function test_coin_inserted_payload_carries_the_event_id_the_denomination_and_state(): void
     {
         $state = $this->state();
         $event = new CoinInserted($state->id, $state, Denomination::of(Money::fromCents(25)));
 
         self::assertSame(
             [
+                'eventId' => $event->eventId->toString(),
                 'state' => $this->expectedStateSnapshot(),
                 'denomination' => ['amountInCents' => 25],
             ],
@@ -55,7 +64,7 @@ final class VendingMachineEventTest extends TestCase
         );
     }
 
-    public function test_item_vended_payload_carries_the_vended_item_and_state(): void
+    public function test_item_vended_payload_carries_the_event_id_the_vended_item_and_state(): void
     {
         $state = $this->state();
         $vendedItem = new VendedItem('WATER', Money::fromCents(65), ChangeDue::fromCounts([25 => 1, 10 => 1]));
@@ -63,6 +72,7 @@ final class VendingMachineEventTest extends TestCase
 
         self::assertSame(
             [
+                'eventId' => $event->eventId->toString(),
                 'state' => $this->expectedStateSnapshot(),
                 'vendedItem' => [
                     'selectorCode' => 'WATER',
@@ -74,13 +84,14 @@ final class VendingMachineEventTest extends TestCase
         );
     }
 
-    public function test_inserted_funds_returned_payload_carries_the_returned_funds_and_state(): void
+    public function test_inserted_funds_returned_payload_carries_the_event_id_the_returned_funds_and_state(): void
     {
         $state = $this->state();
         $event = new InsertedFundsReturned($state->id, $state, InsertedFunds::fromDenominations([25, 10]));
 
         self::assertSame(
             [
+                'eventId' => $event->eventId->toString(),
                 'state' => $this->expectedStateSnapshot(),
                 'returnedFunds' => ['denominationsInCents' => [25, 10]],
             ],
@@ -88,19 +99,22 @@ final class VendingMachineEventTest extends TestCase
         );
     }
 
-    public function test_insufficient_change_return_payload_carries_the_returned_funds_and_state(): void
+    public function test_insufficient_change_return_payload_carries_the_event_id_the_selector_code_the_returned_funds_and_state(): void
     {
         $state = $this->state();
         $event = new InsertedFundsReturnedDueToInsufficientChange(
             $state->id,
             $state,
             InsertedFunds::fromDenominations([25, 10]),
+            'WATER',
         );
 
         self::assertSame(
             [
+                'eventId' => $event->eventId->toString(),
                 'state' => $this->expectedStateSnapshot(),
                 'returnedFunds' => ['denominationsInCents' => [25, 10]],
+                'selectorCode' => 'WATER',
             ],
             $event->payload(),
         );
@@ -128,8 +142,123 @@ final class VendingMachineEventTest extends TestCase
         self::assertSame($id, new InsertedFundsReturned($state->id, $state, InsertedFunds::none())->aggregateId());
         self::assertSame(
             $id,
-            new InsertedFundsReturnedDueToInsufficientChange($state->id, $state, InsertedFunds::none())->aggregateId(),
+            new InsertedFundsReturnedDueToInsufficientChange(
+                $state->id,
+                $state,
+                InsertedFunds::none(),
+                'WATER',
+            )->aggregateId(),
         );
+    }
+
+    public function test_every_event_mints_a_fresh_uuidv7_event_id_when_recorded(): void
+    {
+        foreach ($this->events() as $event) {
+            // Reading it back only succeeds when the id is a well-formed UUIDv7.
+            self::assertSame($event->eventId(), EventId::fromString($event->eventId())->toString());
+        }
+
+        $first = new VendingMachineProvisioned($this->state()->id, $this->state());
+        $second = new VendingMachineProvisioned($this->state()->id, $this->state());
+
+        self::assertNotSame($first->eventId(), $second->eventId());
+    }
+
+    public function test_every_event_reports_the_version_the_mutation_left_the_state_at(): void
+    {
+        foreach ($this->events() as $event) {
+            self::assertSame(4, $event->aggregateVersion());
+        }
+    }
+
+    public function test_a_provisioned_event_rebuilds_from_its_payload(): void
+    {
+        $event = new VendingMachineProvisioned($this->state()->id, $this->state());
+
+        $this->assertRoundTrip($event, VendingMachineProvisioned::fromPayload($event->payload()));
+    }
+
+    public function test_a_serviced_event_rebuilds_from_its_payload(): void
+    {
+        $event = new VendingMachineServiced($this->state()->id, $this->state());
+
+        $this->assertRoundTrip($event, VendingMachineServiced::fromPayload($event->payload()));
+    }
+
+    public function test_a_coin_inserted_event_rebuilds_from_its_payload(): void
+    {
+        $event = new CoinInserted($this->state()->id, $this->state(), Denomination::of(Money::fromCents(25)));
+
+        $this->assertRoundTrip($event, CoinInserted::fromPayload($event->payload()));
+    }
+
+    public function test_an_item_vended_event_rebuilds_from_its_payload(): void
+    {
+        $event = new ItemVended(
+            $this->state()->id,
+            $this->state(),
+            new VendedItem('WATER', Money::fromCents(65), ChangeDue::fromCounts([25 => 1, 10 => 1])),
+        );
+
+        $this->assertRoundTrip($event, ItemVended::fromPayload($event->payload()));
+    }
+
+    public function test_an_inserted_funds_returned_event_rebuilds_from_its_payload(): void
+    {
+        $event = new InsertedFundsReturned(
+            $this->state()->id,
+            $this->state(),
+            InsertedFunds::fromDenominations([25, 10]),
+        );
+
+        $this->assertRoundTrip($event, InsertedFundsReturned::fromPayload($event->payload()));
+    }
+
+    public function test_an_insufficient_change_return_event_rebuilds_from_its_payload(): void
+    {
+        $event = new InsertedFundsReturnedDueToInsufficientChange(
+            $this->state()->id,
+            $this->state(),
+            InsertedFunds::fromDenominations([25, 10]),
+            'WATER',
+        );
+
+        $this->assertRoundTrip($event, InsertedFundsReturnedDueToInsufficientChange::fromPayload($event->payload()));
+    }
+
+    private function assertRoundTrip(VendingMachineEvent $original, VendingMachineEvent $rebuilt): void
+    {
+        self::assertInstanceOf($original::class, $rebuilt);
+        self::assertSame($original->eventId(), $rebuilt->eventId());
+        self::assertSame($original->aggregateId(), $rebuilt->aggregateId());
+        self::assertSame($original->aggregateVersion(), $rebuilt->aggregateVersion());
+        self::assertSame($original->payload(), $rebuilt->payload());
+    }
+
+    /**
+     * @return list<VendingMachineEvent>
+     */
+    private function events(): array
+    {
+        $state = $this->state();
+
+        return [
+            new VendingMachineProvisioned($state->id, $state),
+            new VendingMachineServiced($state->id, $state),
+            new CoinInserted($state->id, $state, Denomination::of(Money::fromCents(25))),
+            new ItemVended(
+                $state->id,
+                $state,
+                new VendedItem('WATER', Money::fromCents(65), ChangeDue::fromCounts([25 => 1, 10 => 1])),
+            ),
+            new InsertedFundsReturned($state->id, $state, InsertedFunds::fromDenominations([25, 10])),
+            new InsertedFundsReturnedDueToInsufficientChange(
+                $state->id,
+                $state,
+                InsertedFunds::fromDenominations([25, 10]),
+                'WATER',
+            ),
+        ];
     }
 
     private function state(): VendingMachineState

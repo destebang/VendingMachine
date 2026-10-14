@@ -8,6 +8,7 @@ use App\Kernel\DocumentManagerFactory;
 use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
 use App\VendingMachine\Domain\Model\AcceptedDenominations;
 use App\VendingMachine\Domain\Model\CashReserve;
+use App\VendingMachine\Domain\Model\Denomination;
 use App\VendingMachine\Domain\Model\InsertedFunds;
 use App\VendingMachine\Domain\Model\Money;
 use App\VendingMachine\Domain\Model\Product;
@@ -15,6 +16,7 @@ use App\VendingMachine\Domain\Model\Stock;
 use App\VendingMachine\Domain\Model\VendingMachine;
 use App\VendingMachine\Domain\Model\VendingMachineId;
 use App\VendingMachine\Infrastructure\Persistence\Mongo\MongoVendingMachineRepository;
+use Doctrine\ODM\MongoDB\LockException;
 use PHPUnit\Framework\TestCase;
 
 final class MongoVendingMachineRepositoryTest extends TestCase
@@ -82,5 +84,47 @@ final class MongoVendingMachineRepositoryTest extends TestCase
         $this->expectException(VendingMachineNotFoundException::class);
 
         $repository->get(VendingMachineId::generate());
+    }
+
+    public function test_the_stored_version_stays_in_step_with_the_aggregates_mutations(): void
+    {
+        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $id = VendingMachineId::generate();
+
+        $machine = VendingMachine::create($id, AcceptedDenominations::fromCents([5, 10, 25, 100]));
+        $repository->save($machine);
+
+        // Provisioning is the first recorded mutation: the document is seeded at version 1.
+        self::assertSame(1, $repository->get($id)->state()->version);
+
+        $machine->insertCoin(Denomination::of(Money::fromCents(25)));
+        $repository->save($machine);
+
+        self::assertSame(2, $repository->get($id)->state()->version);
+    }
+
+    public function test_a_stale_save_is_rejected_by_the_optimistic_lock(): void
+    {
+        $reader = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $id = VendingMachineId::generate();
+
+        $reader->save(VendingMachine::create($id, AcceptedDenominations::fromCents([5, 10, 25, 100])));
+
+        // Two aggregates for the same machine, each loaded into its own
+        // document manager, so each believes the machine is still at version 1.
+        $fresh = $reader->get($id);
+        $staleRepository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $stale = $staleRepository->get($id);
+
+        $fresh->insertCoin(Denomination::of(Money::fromCents(25)));
+        $reader->save($fresh);
+
+        $stale->insertCoin(Denomination::of(Money::fromCents(10)));
+
+        $this->expectException(LockException::class);
+
+        // The stale aggregate's save still expects version 1, but the machine
+        // is at version 2 now, so the optimistic lock rejects it.
+        $staleRepository->save($stale);
     }
 }

@@ -33,6 +33,14 @@ use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
  * Every mutation records a domain event describing it. The aggregate does not
  * publish them: it only releases what it has recorded, so the application
  * layer can decide when and how to publish.
+ *
+ * The version is the aggregate's own optimistic-concurrency counter, and it
+ * advances in lockstep with the events: every mutation that records an event
+ * bumps it exactly once, before the event is constructed, so each event names
+ * the version the machine was left at. One mutation per flush keeps it in step
+ * with the version the repository's persistence layer manages. Rejections
+ * that throw before mutating change nothing and record nothing, so the version
+ * stands still.
  */
 final class VendingMachine
 {
@@ -56,7 +64,7 @@ final class VendingMachine
     /**
      * A brand-new, unstocked machine accepting the given denominations: empty
      * stock, empty reserve, no inserted funds. Records the machine's first
-     * event.
+     * event and leaves the machine at version 1.
      */
     public static function create(VendingMachineId $id, AcceptedDenominations $acceptedDenominations): self
     {
@@ -68,6 +76,7 @@ final class VendingMachine
             CashReserve::empty(),
             0,
         );
+        $vendingMachine->bumpVersion();
         $vendingMachine->record(new VendingMachineProvisioned($id, $vendingMachine->state()));
 
         return $vendingMachine;
@@ -122,6 +131,7 @@ final class VendingMachine
         }
 
         $this->insertedFunds = $this->insertedFunds->plus($coin);
+        $this->bumpVersion();
 
         $this->record(new CoinInserted($this->id, $this->state(), $coin));
     }
@@ -139,6 +149,7 @@ final class VendingMachine
     {
         $returnedFunds = $this->insertedFunds;
         $this->insertedFunds = InsertedFunds::none();
+        $this->bumpVersion();
 
         $this->record(new InsertedFundsReturned($this->id, $this->state(), $returnedFunds));
 
@@ -163,7 +174,8 @@ final class VendingMachine
      *   returns every inserted coin, resetting the balance to zero.
      *
      * A success records `ItemVended`, and an exact-change rejection records
-     * `InsertedFundsReturnedDueToInsufficientChange` before it throws. The
+     * `InsertedFundsReturnedDueToInsufficientChange` (carrying the rejected
+     * selector code) before it throws. The
      * `OutOfStock` and `InsufficientFunds` rejections throw before any mutation
      * and record nothing.
      */
@@ -191,8 +203,16 @@ final class VendingMachine
             // already changed.
             $returnedFunds = $this->insertedFunds;
             $this->insertedFunds = InsertedFunds::none();
+            $this->bumpVersion();
 
-            $this->record(new InsertedFundsReturnedDueToInsufficientChange($this->id, $this->state(), $returnedFunds));
+            $this->record(
+                new InsertedFundsReturnedDueToInsufficientChange(
+                    $this->id,
+                    $this->state(),
+                    $returnedFunds,
+                    $selectorCode,
+                ),
+            );
 
             throw InsufficientChangeAvailableException::forAmount($changeDue);
         }
@@ -202,6 +222,7 @@ final class VendingMachine
         $this->cashReserve = $this->cashReserve->reducedBy($change);
         $product->decreaseStock();
         $this->insertedFunds = InsertedFunds::none();
+        $this->bumpVersion();
 
         $vendedItem = new VendedItem($selectorCode, $price, $change);
         $this->record(new ItemVended($this->id, $this->state(), $vendedItem));
@@ -228,6 +249,7 @@ final class VendingMachine
         $this->stock = $stock;
         $this->cashReserve = $cashReserve;
         $this->acceptedDenominations = $acceptedDenominations;
+        $this->bumpVersion();
 
         $this->record(new VendingMachineServiced($this->id, $this->state()));
     }
@@ -255,6 +277,19 @@ final class VendingMachine
     private function hasPendingTransaction(): bool
     {
         return !$this->insertedFunds->isEmpty();
+    }
+
+    /**
+     * Advances the aggregate's version by one as part of applying a mutation.
+     * Called exactly once per mutation that records an event, before the event
+     * is constructed, so the event's snapshot and `aggregateVersion()` name
+     * the version the machine was left at — and one bump per flush keeps the
+     * aggregate in step with the version the persistence layer manages for
+     * optimistic locking.
+     */
+    private function bumpVersion(): void
+    {
+        $this->version++;
     }
 
     private function record(DomainEvent $event): void

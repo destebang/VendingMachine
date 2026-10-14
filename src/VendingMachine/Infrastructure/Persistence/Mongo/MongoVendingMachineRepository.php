@@ -61,6 +61,11 @@ final class MongoVendingMachineRepository implements VendingMachineRepository
             $this->documentManager->persist($document);
         }
 
+        // The version field is ODM's optimistic-locking version and is never
+        // assigned here. ODM bumps it by one on every flush that writes (and
+        // seeds it from the aggregate on the initial insert), which stays in
+        // step with the aggregate: it bumps once per mutation that records an
+        // event, and every save flushes exactly one recorded mutation.
         $document->acceptedDenominationsInCents = $state->acceptedDenominations->denominationsInCents();
         $document->insertedDenominationsInCents = $state->insertedFunds->denominationsInCents();
         $document->stock = self::stockToDocument($state->stock->products());

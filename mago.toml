@@ -26,7 +26,7 @@ inline-variable-return = { enabled = false }
 # wide but coherent state object is not a smell here. Integration events are
 # likewise immutable data carriers whose constructor is the full published
 # envelope plus the event's small payload — a DTO, not logic.
-excessive-parameter-list = { threshold = 6, exclude = ["src/VendingMachine/Application/IntegrationEvent/**"] }
+excessive-parameter-list = { threshold = 6, exclude = ["src/VendingMachine/Application/IntegrationEvent/**", "src/Sales/Application/IntegrationEvent/**"] }
 
 # --- Architectural guard ----------------------------------------------------
 #
@@ -39,6 +39,9 @@ layering = [
     "App\\VendingMachine\\Domain",
     "App\\VendingMachine\\Application",
     "App\\VendingMachine\\Infrastructure",
+    "App\\Sales\\Domain",
+    "App\\Sales\\Application",
+    "App\\Sales\\Infrastructure",
 ]
 layering-reason = "Outer layers may depend on inner layers, never the reverse."
 
@@ -89,6 +92,31 @@ permit = [
 reason = "Infrastructure adapters may use framework and driver libraries, and the shared infrastructure building blocks (e.g. the domain event collector)."
 
 [[guard.perimeter.rules]]
+namespace = "App\\Sales\\Domain\\"
+permit = ["@self", "@native"]
+reason = "The Sales Domain layer may only use itself and PHP built-ins."
+
+[[guard.perimeter.rules]]
+namespace = "App\\Sales\\Application\\"
+permit = ["@self", "@native", "App\\Shared\\Application\\**"]
+reason = "The Sales Application layer may only use itself, the shared Application building blocks and PHP built-ins."
+
+[[guard.perimeter.rules]]
+namespace = "App\\Sales\\Infrastructure\\"
+permit = [
+    "@self",
+    "@native",
+    "App\\Shared\\Application\\**",
+    "App\\Shared\\Infrastructure\\**",
+    "Symfony\\**",
+    "Doctrine\\**",
+    "MongoDB\\**",
+    "Predis\\**",
+    "Psr\\**",
+]
+reason = "Sales infrastructure adapters may use framework and driver libraries, and the shared infrastructure building blocks."
+
+[[guard.perimeter.rules]]
 namespace = "App\\Kernel\\"
 permit = ["@all"]
 reason = "The Kernel is the composition root and wires every layer together."
@@ -122,6 +150,31 @@ reason = "MongoDB must not leak into the Domain or Application layers."
 dependency = "App\\VendingMachine\\Domain\\"
 deny-from = ["App\\VendingMachine\\Application\\IntegrationEvent\\"]
 reason = "Integration events are the context's published language: small primitive payloads, never the domain model. The translator is the only code allowed to see both."
+
+[[guard.perimeter.restrictions]]
+dependency = "Symfony\\**"
+deny-from = ["App\\Sales\\Domain\\", "App\\Sales\\Application\\"]
+reason = "Symfony must not leak into the Sales Domain or Application layers."
+
+[[guard.perimeter.restrictions]]
+dependency = "Doctrine\\**"
+deny-from = ["App\\Sales\\Domain\\", "App\\Sales\\Application\\"]
+reason = "Doctrine must not leak into the Sales Domain or Application layers."
+
+[[guard.perimeter.restrictions]]
+dependency = "Predis\\**"
+deny-from = ["App\\Sales\\Domain\\", "App\\Sales\\Application\\"]
+reason = "Predis must not leak into the Sales Domain or Application layers."
+
+[[guard.perimeter.restrictions]]
+dependency = "MongoDB\\**"
+deny-from = ["App\\Sales\\Domain\\", "App\\Sales\\Application\\"]
+reason = "MongoDB must not leak into the Sales Domain or Application layers."
+
+[[guard.perimeter.restrictions]]
+dependency = "App\\VendingMachine\\**"
+deny-from = ["App\\Sales\\**"]
+reason = "Sales consumes the published language only; it must never depend on the VendingMachine context's code."
 
 # --- Structural conventions -------------------------------------------------
 
@@ -160,6 +213,33 @@ reason = "Domain value objects must be immutable (readonly); the aggregate and i
 
 [[guard.structural.rules]]
 on = "App\\VendingMachine\\Domain\\Exception\\**"
+target = "class"
+must-be-final = true
+must-be-named = "*Exception"
+reason = "Domain exceptions must be final and named *Exception."
+
+[[guard.structural.rules]]
+on = "App\\Sales\\Infrastructure\\Http\\**"
+target = "class"
+must-be-final = true
+must-be-named = "*Controller"
+reason = "HTTP controllers must be final and named *Controller."
+
+[[guard.structural.rules]]
+on = "App\\Sales\\Domain\\Repository\\**"
+target = "interface"
+must-be-named = "*Repository"
+reason = "Domain repository interfaces must be named *Repository."
+
+[[guard.structural.rules]]
+on = "App\\Sales\\Domain\\Model\\**"
+target = "class"
+must-be-final = true
+must-be-readonly = true
+reason = "Sales domain records are immutable (readonly) facts."
+
+[[guard.structural.rules]]
+on = "App\\Sales\\Domain\\Exception\\**"
 target = "class"
 must-be-final = true
 must-be-named = "*Exception"

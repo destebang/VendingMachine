@@ -59,6 +59,31 @@ services:
         condition: service_healthy
     command: ["php", "bin/console", "app:outbox:relay"]
 
+  # The Sales context's worker: consumes `vending_machine.item_vended.v1` from
+  # the `sales.item_vended` queue and registers a Sale. A failure is retried
+  # with a backoff and dead-lettered to `sales.item_vended.dlq` once exhausted.
+  sales-worker:
+    build: .
+    environment:
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DB: vending
+      MESSENGER_TRANSPORT_DSN: amqp://guest:guest@rabbitmq:5672/%2f
+    volumes:
+      - .:/app
+      - vendor:/app/vendor
+    depends_on:
+      mongodb:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    command:
+      - php
+      - bin/console
+      - messenger:consume
+      - sales_integration_events
+      - --time-limit=3600
+      - --memory-limit=256M
+
 volumes:
   mongo-data:
   rabbitmq-data:

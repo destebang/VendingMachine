@@ -28,6 +28,9 @@ services:
             - '../src/VendingMachine/Domain/Event'
             - '../src/VendingMachine/Domain/Exception'
             - '../src/VendingMachine/Infrastructure/Persistence/Mongo/VendingMachineDocument.php'
+            - '../src/Sales/Domain/Model'
+            - '../src/Sales/Domain/Exception'
+            - '../src/Sales/Infrastructure/Persistence/Mongo/SaleDocument.php'
 
     App\VendingMachine\Infrastructure\Http\:
         resource: '../src/VendingMachine/Infrastructure/Http'
@@ -37,12 +40,19 @@ services:
         resource: '../src/VendingMachine/Infrastructure/Console'
         public: true
 
+    App\Sales\Infrastructure\Http\:
+        resource: '../src/Sales/Infrastructure/Http'
+        public: true
+
     # --- Ports -> adapters -------------------------------------------------
     App\VendingMachine\Domain\Repository\VendingMachineRepository:
         alias: App\VendingMachine\Infrastructure\Persistence\Mongo\MongoVendingMachineRepository
 
     App\VendingMachine\Application\ReadModel\VendingMachineStateReadModelRepository:
         alias: App\VendingMachine\Infrastructure\ReadModel\Redis\RedisVendingMachineStateReadModelRepository
+
+    App\Sales\Domain\Repository\SaleRepository:
+        alias: App\Sales\Infrastructure\Persistence\Mongo\MongoSaleRepository
 
     # --- Third-party clients, built by hand-written factories --------------
     Doctrine\ODM\MongoDB\DocumentManager:
@@ -165,9 +175,41 @@ services:
             $eventTypes:
                 'vending_machine.item_vended.v1': 'App\VendingMachine\Application\IntegrationEvent\ItemVendedV1'
 
+    # The Sales context's own view of the same wire: the same JSON envelope,
+    # decoded into Sales' consumer-owned message class rather than the
+    # producer's, so the two contexts never share a class across the boundary.
+    App\Kernel\IntegrationEvent\JsonEnvelopeSerializer.sales:
+        class: App\Kernel\IntegrationEvent\JsonEnvelopeSerializer
+        arguments:
+            $eventTypes:
+                'vending_machine.item_vended.v1': 'App\Sales\Application\IntegrationEvent\ItemVendedV1Received'
+
     messenger.transport.integration_events:
         class: Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpTransport
         factory: ['App\Kernel\IntegrationEvent\AmqpTransportFactory', 'create']
+        arguments:
+            - '@App\Kernel\IntegrationEvent\JsonEnvelopeSerializer'
+
+    # The Sales worker's queue, bound to the vending machine's exchange with the
+    # one routing key Sales consumes. Its worker retries with a backoff and
+    # dead-letters to the failure transport below.
+    messenger.transport.sales_integration_events:
+        class: Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpTransport
+        factory: ['App\Kernel\IntegrationEvent\AmqpTransportFactory', 'createForQueue']
+        arguments:
+            - '@App\Kernel\IntegrationEvent\JsonEnvelopeSerializer.sales'
+            - 'sales.item_vended'
+            - ['vending_machine.item_vended.v1']
+
+    # Where Sales dead-letters a message whose retries were exhausted. Its own
+    # exchange, so only failures land here, never the healthy traffic.
+    messenger.transport.sales_integration_events_failed:
+        class: Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpTransport
+        factory: ['App\Kernel\IntegrationEvent\AmqpTransportFactory', 'createFailureTransport']
+        arguments:
+            - '@App\Kernel\IntegrationEvent\JsonEnvelopeSerializer.sales'
+            - 'sales.item_vended.dlx'
+            - 'sales.item_vended.dlq'
 
     integration.bus:
         class: Symfony\Component\Messenger\MessageBus
@@ -184,17 +226,23 @@ services:
             - []
 
     # Symfony Messenger's own console commands, built by hand and pulled from
-    # the container in bin/console.
+    # the container in bin/console. The consume command is the Sales worker: it
+    # consumes `sales.item_vended`, retries with a backoff and dead-letters to
+    # `sales.item_vended.dlq`.
     Symfony\Component\Messenger\Command\ConsumeMessagesCommand:
         factory: ['App\Kernel\IntegrationEvent\MessengerCommandsFactory', 'createConsumeMessagesCommand']
         arguments:
             - '@integration.bus'
-            - '@messenger.transport.integration_events'
+            - '@messenger.transport.sales_integration_events'
+            - '@messenger.transport.sales_integration_events_failed'
         public: true
 
     Symfony\Component\Messenger\Command\SetupTransportsCommand:
         factory: ['App\Kernel\IntegrationEvent\MessengerCommandsFactory', 'createSetupTransportsCommand']
         arguments:
-            - '@messenger.transport.integration_events'
+            $transports:
+                integration_events: '@messenger.transport.integration_events'
+                sales_integration_events: '@messenger.transport.sales_integration_events'
+                sales_integration_events_failed: '@messenger.transport.sales_integration_events_failed'
         public: true
 

@@ -31,10 +31,11 @@ final class HandlerAutoregistrationTest extends TestCase
         );
 
         self::assertCount(
-            13,
+            16,
             $handlerDescriptors,
             'MessengerPass must build one handler descriptor per autoconfigured handler: '
-            . '7 command/query handlers plus the 6 event-subscriber methods of the read-model projector.',
+            . '9 command/query handlers, the 6 event-subscriber methods of the read-model projector, '
+            . 'and the Sales integration-event subscriber.',
         );
     }
 

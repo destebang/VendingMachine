@@ -8,7 +8,7 @@ use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpTransport;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\Connection;
 
 /**
- * Builds the AMQP transport of the integration bus by hand, since there is
+ * Builds the AMQP transports of the integration bus by hand, since there is
  * no framework bundle to do it via configuration. Connection details come
  * from the `MESSENGER_TRANSPORT_DSN` environment variable; the exchange,
  * queue and publisher-confirm settings are the context's contract and stay
@@ -17,10 +17,8 @@ use Symfony\Component\Messenger\Bridge\Amqp\Transport\Connection;
  * The exchange is the durable topic exchange `vending_machine.integration`, the
  * published language's well-known address: publishers route by event type,
  * and each consuming context binds its own queue with the routing keys it
- * cares about. The context's own queue (`vending-machine.integration`) is
- * bound to every vending-machine message, ready for the subscriber slice.
- * `confirm_timeout` enables publisher confirms, so sending only returns once
- * the broker durably holds the message.
+ * cares about. The producer's own queue (`vending-machine.integration`) is
+ * bound to every vending-machine message.
  */
 final class AmqpTransportFactory
 {
@@ -51,12 +49,35 @@ final class AmqpTransportFactory
     }
 
     /**
+     * The dead-letter transport of a consuming context: a queue bound to a
+     * dedicated exchange of its own, so only messages the consumer's retries
+     * exhausted ever land there — never a copy of the healthy traffic on the
+     * main exchange. The exchange is a fanout: the failed message keeps its
+     * original routing key, which a fanout ignores.
+     */
+    public static function createFailureTransport(
+        JsonEnvelopeSerializer $serializer,
+        string $exchangeName,
+        string $queueName,
+    ): AmqpTransport {
+        return self::transport(
+            $serializer,
+            $queueName,
+            ['#'],
+            exchangeName: $exchangeName,
+            exchangeType: \AMQP_EX_TYPE_FANOUT,
+        );
+    }
+
+    /**
      * @param list<string> $bindingKeys
      */
     private static function transport(
         JsonEnvelopeSerializer $serializer,
         string $queueName,
         array $bindingKeys,
+        string $exchangeName = self::EXCHANGE,
+        string $exchangeType = \AMQP_EX_TYPE_TOPIC,
     ): AmqpTransport {
         $connection = Connection::fromDsn($_ENV['MESSENGER_TRANSPORT_DSN'] ?? self::DEFAULT_DSN, [
             // Publisher confirms: send() waits for the broker's ack and
@@ -64,8 +85,8 @@ final class AmqpTransportFactory
             // held or the caller knows it is not.
             'confirm_timeout' => 5,
             'exchange' => [
-                'name' => self::EXCHANGE,
-                'type' => \AMQP_EX_TYPE_TOPIC,
+                'name' => $exchangeName,
+                'type' => $exchangeType,
                 'flags' => \AMQP_DURABLE,
             ],
             'queues' => [

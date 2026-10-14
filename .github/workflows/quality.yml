@@ -44,13 +44,16 @@ jobs:
 
       - name: Render AsyncAPI docs
         run: |
-          docker run --rm --user=root \
-            -v "$PWD:/work" -w /work \
-            -e SUPPRESS_NO_CONFIG_WARNING=true \
-            asyncapi/cli:6.2.1 generate fromTemplate \
-              docs/asyncapi/vending-machine.asyncapi.yaml \
-              @asyncapi/html-template@3.5.6 \
-              --output /work/asyncapi-docs --force-write --no-interactive
+          for spec in docs/asyncapi/*.asyncapi.yaml; do
+            name=$(basename "$spec" .asyncapi.yaml)
+            docker run --rm --user=root \
+              -v "$PWD:/work" -w /work \
+              -e SUPPRESS_NO_CONFIG_WARNING=true \
+              asyncapi/cli:6.2.1 generate fromTemplate \
+                "$spec" \
+                @asyncapi/html-template@3.5.6 \
+                --output "/work/asyncapi-docs/$name" --force-write --no-interactive
+          done
 
       - name: Upload AsyncAPI docs
         uses: actions/upload-artifact@v4

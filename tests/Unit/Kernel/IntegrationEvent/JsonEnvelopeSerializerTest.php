@@ -10,6 +10,7 @@ use DateTimeImmutable;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\MessageDecodingFailedException;
+use Symfony\Component\Messenger\Stamp\RedeliveryStamp;
 
 final class JsonEnvelopeSerializerTest extends TestCase
 {
@@ -56,6 +57,19 @@ final class JsonEnvelopeSerializerTest extends TestCase
         self::assertSame('2026-10-14T10:30:00+00:00', $decoded->occurredAt->format(\DateTimeInterface::RFC3339));
         self::assertSame('01a12f94-62ac-771b-a72a-f8a35ea379bb', $decoded->correlationId);
         self::assertSame($this->event()->data(), $decoded->data());
+    }
+
+    public function test_the_redelivery_count_survives_the_round_trip(): void
+    {
+        $serializer = new JsonEnvelopeSerializer(self::EVENT_TYPES);
+
+        $encoded = $serializer->encode(new Envelope($this->event())->with(new RedeliveryStamp(2)));
+
+        self::assertSame('2', $encoded['headers']['x-redelivery-count']);
+
+        $decoded = $serializer->decode($encoded);
+
+        self::assertSame(2, $decoded->last(RedeliveryStamp::class)?->getRetryCount());
     }
 
     public function test_decode_fails_for_a_type_no_event_is_registered_for(): void

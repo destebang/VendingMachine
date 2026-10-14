@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\VendingMachine\Infrastructure;
 
 use App\Kernel\DocumentManagerFactory;
+use App\Shared\Infrastructure\EventBus\DomainEventCollector;
 use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
 use App\VendingMachine\Domain\Model\AcceptedDenominations;
 use App\VendingMachine\Domain\Model\CashReserve;
@@ -23,7 +24,7 @@ final class MongoVendingMachineRepositoryTest extends TestCase
 {
     public function test_it_persists_and_retrieves_a_vending_machine(): void
     {
-        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create(), new DomainEventCollector());
         $id = VendingMachineId::generate();
 
         self::assertNull($repository->find($id));
@@ -38,7 +39,7 @@ final class MongoVendingMachineRepositoryTest extends TestCase
 
     public function test_it_round_trips_stock_reserve_and_inserted_funds(): void
     {
-        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create(), new DomainEventCollector());
         $id = VendingMachineId::generate();
 
         $repository->save(VendingMachine::reconstitute(
@@ -67,7 +68,7 @@ final class MongoVendingMachineRepositoryTest extends TestCase
 
     public function test_get_returns_the_stored_machine(): void
     {
-        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create(), new DomainEventCollector());
         $id = VendingMachineId::generate();
 
         $repository->save(VendingMachine::create($id, AcceptedDenominations::fromCents([5, 10, 25, 100])));
@@ -79,7 +80,7 @@ final class MongoVendingMachineRepositoryTest extends TestCase
 
     public function test_get_fails_when_the_machine_does_not_exist(): void
     {
-        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create(), new DomainEventCollector());
 
         $this->expectException(VendingMachineNotFoundException::class);
 
@@ -88,7 +89,7 @@ final class MongoVendingMachineRepositoryTest extends TestCase
 
     public function test_the_stored_version_stays_in_step_with_the_aggregates_mutations(): void
     {
-        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create(), new DomainEventCollector());
         $id = VendingMachineId::generate();
 
         $machine = VendingMachine::create($id, AcceptedDenominations::fromCents([5, 10, 25, 100]));
@@ -105,7 +106,7 @@ final class MongoVendingMachineRepositoryTest extends TestCase
 
     public function test_a_stale_save_is_rejected_by_the_optimistic_lock(): void
     {
-        $reader = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $reader = new MongoVendingMachineRepository(DocumentManagerFactory::create(), new DomainEventCollector());
         $id = VendingMachineId::generate();
 
         $reader->save(VendingMachine::create($id, AcceptedDenominations::fromCents([5, 10, 25, 100])));
@@ -113,7 +114,10 @@ final class MongoVendingMachineRepositoryTest extends TestCase
         // Two aggregates for the same machine, each loaded into its own
         // document manager, so each believes the machine is still at version 1.
         $fresh = $reader->get($id);
-        $staleRepository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
+        $staleRepository = new MongoVendingMachineRepository(
+            DocumentManagerFactory::create(),
+            new DomainEventCollector(),
+        );
         $stale = $staleRepository->get($id);
 
         $fresh->insertCoin(Denomination::of(Money::fromCents(25)));

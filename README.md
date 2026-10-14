@@ -11,8 +11,8 @@ vending machine (declaring the denominations it accepts), service it (declare it
 true item stock, coin reserve and accepted denominations), read its current state
 back, insert coins toward the price of an item, select a product to vend it and
 hand back any change due, and return every inserted coin before buying. The write side lives in MongoDB (Doctrine ODM), the read side in
-Redis, and the two are kept in step by the command handlers. A health check still
-round-trips data through both stores.
+Redis, and the two are kept in step by domain events published synchronously
+after each command. A health check still round-trips data through both stores.
 
 ## Requirements
 
@@ -174,8 +174,11 @@ docker compose exec -e MONGO_DB=vending_test -e REDIS_URL=redis://redis:6379/1 \
   (and its payload) and the rejections that record nothing.
 * **Integration** (`tests/Integration`) — the MongoDB repository, the Redis
   read-model repository and the
-  provision/service/insert-coin/select-item/return-coin use cases against real
-  instances.
+  provision/service/insert-coin/select-item/return-coin use cases dispatched
+  through the real command bus against real instances, so the event publication
+  and the projection run as in production — including the rules that a command
+  rejected after mutating still publishes its events and a no-change command
+  publishes nothing.
 * **Functional** (`tests/Functional`) — boots the real HTTP application and the
   real CLI commands and exercises provisioning, servicing, inserting coins,
   reading state, selecting products and returning inserted coins (plus the
@@ -244,7 +247,9 @@ src/
 │   └── Bus/                     # MessengerCommandBus / MessengerQueryBus adapters
 ├── Shared/                     # Cross-aggregate, framework-free building blocks
 │   ├── Domain/Event/           # DomainEvent + DomainEventBus contracts
-│   └── Application/Bus/        # CommandHandler/QueryHandler markers + CommandBus/QueryBus ports
+│   ├── Application/Bus/        # Handler/subscriber markers + CommandBus/QueryBus ports
+│   └── Infrastructure/EventBus/ # Collector, Messenger domain event bus and the
+│                                # command-bus middleware that publishes on commit
 └── VendingMachine/
     ├── Domain/                 # Pure business logic. No framework, no I/O.
     │   ├── Model/               # Money, Denomination, Product, ChangeDue,
@@ -261,7 +266,8 @@ src/
     │   ├── SelectItem/               # Customer selects a product; vend + change
     │   ├── ReturnCoin/               # Customer takes back the coins inserted
     │   ├── GetVendingMachineState/   # Read-side query over the Redis projection
-    │   └── ReadModel/           # Read-model port + MachineStateView
+    │   └── ReadModel/           # Read-model port + MachineStateView + the
+    │                            # projector that subscribes to domain events
     └── Infrastructure/         # Adapters: the only place that knows about
         │                        # Mongo/Redis/HTTP/console.
         ├── Persistence/Mongo/   # Doctrine ODM document + repository
@@ -290,19 +296,23 @@ identical service wiring.
 
 ### CQRS-shaped from day one
 
-Two Symfony Messenger buses (`config/services.yaml`) carry the two sides, each
+Three Symfony Messenger buses (`config/services.yaml`) carry the messaging, each
 with its own synchronous, in-memory handlers locator. `command.bus` handles the
 write use cases — `ProvisionVendingMachine`, `ServiceVendingMachine`,
 `InsertCoin`, `SelectItem`, `ReturnCoin` and the `HealthCheck` smoke test —
-while `query.bus` handles the read-side `GetVendingMachineState` query.
+while `query.bus` handles the read-side `GetVendingMachineState` query, and
+`domain_event.bus` carries the domain events a command recorded to its
+subscribers.
 
 Handlers self-register: a handler class marked `#[CommandHandler]` is
-autoconfigured onto `command.bus` and one marked `#[QueryHandler]` onto
-`query.bus` by `App\Kernel\ContainerFactory`, so adding a use case is adding the
-handler class — no hand-written message→handler map. Symfony's own
+autoconfigured onto `command.bus`, one marked `#[QueryHandler]` onto
+`query.bus`, and every public event method of a class marked
+`#[DomainEventSubscriber]` onto `domain_event.bus` by
+`App\Kernel\ContainerFactory`, so adding a use case or a reaction is adding the
+class — no hand-written message→handler map. Symfony's own
 `MessengerPass` builds each bus and its handlers locator from those tags, and a
 compiler pass refuses to compile when a command or query ends up with zero
-handlers or more than one.
+handlers or more than one — while an event may have any number of subscribers.
 
 The driving adapters depend on framework-free ports, not on Messenger: the
 read side (`GetVendingMachineController`, `GetVendingMachineCommand`) asks
@@ -312,7 +322,7 @@ through `QueryBus` (`ask(object $query): mixed`) and the write side (every
 adapters know the framework; the command adapter also unwraps Messenger's
 `HandlerFailedException`, so the adapters catch domain exceptions directly.
 
-### Domain events (write-side foundation)
+### Domain events, published on commit
 
 Every mutation on the `VendingMachine` aggregate records a domain event: a
 readonly, timestamp-free fact carrying the aggregate identity and the full
@@ -337,11 +347,25 @@ Each event exposes a `fromPayload()` named constructor, the exact inverse of
 its `payload()`, so a persisted event can be read back into a domain object
 without knowing its shape.
 
-The aggregate does not publish events yet — it releases what it has recorded
-through `releaseEvents()`. The events live in `App\VendingMachine\Domain\Event\`
-and reuse the cross-aggregate, framework-free `App\Shared\Domain\Event\`
-contracts (`DomainEvent`, `DomainEventBus`), so a later slice can publish them
-and another aggregate can record its own against the same interface.
+Recording and publishing are deliberately separate: the aggregate only records,
+and infrastructure publishes once the write has committed. Concretely
+(`App\Shared\Infrastructure\EventBus\`):
+
+1. `MongoVendingMachineRepository::save()` releases the aggregate's recorded
+   events **after a successful `flush()`** and hands them to the
+   `DomainEventCollector` — a fact that never persisted is never published.
+2. `PublishDomainEventsMiddleware`, sitting outside `handle_message` on the
+   command bus, publishes the collected events in a `finally` — so a command
+   whose handler throws *after* committing (the exact-change refund) still
+   publishes its events, and a command that changed nothing publishes nothing.
+3. `MessengerDomainEventBus` (the `DomainEventBus` port) dispatches each event
+   on `domain_event.bus` on its own: a subscriber that throws is logged and
+   swallowed, never failing a command whose write is already durable.
+
+Domain events stay in-process and synchronous — they never go over a broker;
+crossing contexts is the job of integration events, a separate concern. Because
+publication is synchronous, the read-model projection it drives is up to date
+by the time the command returns, so reads stay strongly consistent.
 
 ### MongoDB (write model) / Redis (read model)
 
@@ -351,12 +375,14 @@ is the only place that translates between them, and carries a `version` field
 for optimistic concurrency. The Redis read model
 (`RedisVendingMachineStateReadModelRepository`) stores one JSON document per
 machine and is reachable only through the `VendingMachineStateReadModelRepository`
-port. The write commands project a `MachineStateView` into it (provisioning
-seeds it, servicing replaces it, returning resets the balance), and
-`GetVendingMachineState` serves reads straight from it without touching the
-write side. `SelectItem` refreshes it for every outcome, because a rejected
-selection can still change the machine — an exact-change refund resets the
-balance.
+port. No write handler pushes to it: the
+`VendingMachineReadModelProjector` — a `#[DomainEventSubscriber]` with one
+method per event — projects the state every event carries into a
+`MachineStateView` (provisioning seeds it, servicing replaces it, returning
+resets the balance, and a rejected selection refreshes it too, because an
+exact-change refund resets the balance), and `GetVendingMachineState` serves
+reads straight from it without touching the write side. Write handlers stay
+get → domain call → save.
 
 ## Extending it
 

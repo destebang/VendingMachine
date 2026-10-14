@@ -8,6 +8,7 @@ use App\Kernel\DependencyInjection\SingleHandlerPerMessagePass;
 use App\Tests\Unit\Kernel\DependencyInjection\Fixtures\Application\DoSomething\AnotherDoSomethingHandler;
 use App\Tests\Unit\Kernel\DependencyInjection\Fixtures\Application\DoSomething\DoSomething;
 use App\Tests\Unit\Kernel\DependencyInjection\Fixtures\Application\DoSomething\DoSomethingHandler;
+use App\Tests\Unit\Kernel\DependencyInjection\Fixtures\Application\DoSomething\DoSomethingSubscriber;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
@@ -49,6 +50,32 @@ final class SingleHandlerPerMessagePassTest extends TestCase
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage(sprintf('Message "%s" has more than one handler', DoSomething::class));
+
+        $this->pass()->process($container);
+    }
+
+    public function test_it_allows_any_number_of_subscribers_on_the_domain_event_bus(): void
+    {
+        $container = new ContainerBuilder();
+        $container->register(DoSomething::class, DoSomething::class);
+        $container->register(
+            DoSomethingHandler::class,
+            DoSomethingHandler::class,
+        )->addTag('messenger.message_handler', ['bus' => 'command.bus']);
+
+        // The same message may also be observed by any number of domain event
+        // subscribers — including ones with no `__invoke()` — without tripping
+        // the single-handler rule, which only guards commands and queries.
+        $container->register(
+            DoSomethingSubscriber::class,
+            DoSomethingSubscriber::class,
+        )->addTag('messenger.message_handler', ['bus' => 'domain_event.bus', 'method' => 'onDoSomething']);
+        $container->register('another_subscriber', DoSomethingSubscriber::class)->addTag('messenger.message_handler', [
+            'bus' => 'domain_event.bus',
+            'method' => 'onDoSomething',
+        ]);
+
+        $this->expectNotToPerformAssertions();
 
         $this->pass()->process($container);
     }

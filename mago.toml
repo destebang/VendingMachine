@@ -51,6 +51,17 @@ permit = ["@self", "@native"]
 reason = "The shared Application kernel may only use itself and PHP built-ins."
 
 [[guard.perimeter.rules]]
+namespace = "App\\Shared\\Infrastructure\\"
+permit = [
+    "@self",
+    "@native",
+    "App\\Shared\\Domain\\**",
+    "Symfony\\**",
+    "Psr\\**",
+]
+reason = "Shared infrastructure adapters implement the shared ports with framework and PSR libraries."
+
+[[guard.perimeter.rules]]
 namespace = "App\\VendingMachine\\Domain\\"
 permit = ["@self", "@native", "App\\Shared\\Domain\\Event\\**"]
 reason = "The Domain layer may only use itself, the shared Domain event contracts and PHP built-ins."
@@ -66,13 +77,14 @@ permit = [
     "@self",
     "@native",
     "App\\Shared\\Application\\**",
+    "App\\Shared\\Infrastructure\\**",
     "Symfony\\**",
     "Doctrine\\**",
     "MongoDB\\**",
     "Predis\\**",
     "Psr\\**",
 ]
-reason = "Infrastructure adapters may use framework and driver libraries."
+reason = "Infrastructure adapters may use framework and driver libraries, and the shared infrastructure building blocks (e.g. the domain event collector)."
 
 [[guard.perimeter.rules]]
 namespace = "App\\Kernel\\"

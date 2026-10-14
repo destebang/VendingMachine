@@ -19,13 +19,16 @@ use Symfony\Component\Console\Tester\CommandTester;
 
 final class VendingMachineCommandTest extends TestCase
 {
+    /** @var list<int> */
+    private const ACCEPTED_DENOMINATIONS_IN_CENTS = [5, 10, 25, 100];
+
     public function test_the_cli_can_provision_service_and_show_a_machine(): void
     {
         $container = ContainerFactory::create();
 
         $provision = new CommandTester($this->command($container, ProvisionVendingMachineCommand::class));
 
-        self::assertSame(0, $provision->execute([]));
+        self::assertSame(0, $provision->execute($this->provisionInput()));
 
         $id = $this->decode($provision->getDisplay())['id'];
 
@@ -33,7 +36,13 @@ final class VendingMachineCommandTest extends TestCase
 
         self::assertSame(0, $show->execute(['id' => $id]));
         self::assertSame(
-            ['id' => $id, 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 0],
+            [
+                'id' => $id,
+                'acceptedDenominationsInCents' => self::ACCEPTED_DENOMINATIONS_IN_CENTS,
+                'stock' => [],
+                'cashReserve' => [],
+                'insertedFundsInCents' => 0,
+            ],
             $this->decode($show->getDisplay()),
         );
 
@@ -47,12 +56,17 @@ final class VendingMachineCommandTest extends TestCase
                 'stock' => 10,
             ]], JSON_THROW_ON_ERROR),
             '--cash-reserve' => json_encode([['denominationInCents' => 100, 'quantity' => 5]], JSON_THROW_ON_ERROR),
+            '--accepted-denominations-in-cents' => json_encode(
+                self::ACCEPTED_DENOMINATIONS_IN_CENTS,
+                JSON_THROW_ON_ERROR,
+            ),
         ]));
 
         self::assertSame(0, $show->execute(['id' => $id]));
         self::assertSame(
             [
                 'id' => $id,
+                'acceptedDenominationsInCents' => self::ACCEPTED_DENOMINATIONS_IN_CENTS,
                 'stock' => [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10]],
                 'cashReserve' => [['denominationInCents' => 100, 'quantity' => 5]],
                 'insertedFundsInCents' => 0,
@@ -61,12 +75,42 @@ final class VendingMachineCommandTest extends TestCase
         );
     }
 
+    public function test_provisioning_without_the_accepted_denominations_fails(): void
+    {
+        $container = ContainerFactory::create();
+
+        $provision = new CommandTester($this->command($container, ProvisionVendingMachineCommand::class));
+
+        self::assertSame(1, $provision->execute([]));
+        self::assertSame('InvalidRequest', $this->decode($provision->getDisplay())['error']);
+    }
+
+    public function test_the_cli_provisions_a_machine_with_a_custom_coin_set(): void
+    {
+        $container = ContainerFactory::create();
+
+        $provision = new CommandTester($this->command($container, ProvisionVendingMachineCommand::class));
+        $provision->execute($this->provisionInput([10, 50]));
+
+        $id = $this->decode($provision->getDisplay())['id'];
+
+        $show = new CommandTester($this->command($container, GetVendingMachineCommand::class));
+        $show->execute(['id' => $id]);
+
+        self::assertSame([10, 50], $this->decode($show->getDisplay())['acceptedDenominationsInCents']);
+
+        $insertCoin = new CommandTester($this->command($container, InsertCoinCommand::class));
+
+        self::assertSame(1, $insertCoin->execute(['id' => $id, '--denomination-in-cents' => '25']));
+        self::assertSame('InvalidDenomination', $this->decode($insertCoin->getDisplay())['error']);
+    }
+
     public function test_the_cli_can_insert_coins_accumulating_the_balance(): void
     {
         $container = ContainerFactory::create();
 
         $provision = new CommandTester($this->command($container, ProvisionVendingMachineCommand::class));
-        $provision->execute([]);
+        $provision->execute($this->provisionInput());
 
         $id = $this->decode($provision->getDisplay())['id'];
 
@@ -84,7 +128,7 @@ final class VendingMachineCommandTest extends TestCase
         $container = ContainerFactory::create();
 
         $provision = new CommandTester($this->command($container, ProvisionVendingMachineCommand::class));
-        $provision->execute([]);
+        $provision->execute($this->provisionInput());
 
         $id = $this->decode($provision->getDisplay())['id'];
 
@@ -111,7 +155,7 @@ final class VendingMachineCommandTest extends TestCase
         $container = ContainerFactory::create();
 
         $provision = new CommandTester($this->command($container, ProvisionVendingMachineCommand::class));
-        $provision->execute([]);
+        $provision->execute($this->provisionInput());
 
         $id = $this->decode($provision->getDisplay())['id'];
 
@@ -190,7 +234,7 @@ final class VendingMachineCommandTest extends TestCase
     private function servicedMachine(ContainerInterface $container): string
     {
         $provision = new CommandTester($this->command($container, ProvisionVendingMachineCommand::class));
-        $provision->execute([]);
+        $provision->execute($this->provisionInput());
 
         $id = $this->decode($provision->getDisplay())['id'];
 
@@ -206,6 +250,10 @@ final class VendingMachineCommandTest extends TestCase
                 ['denominationInCents' => 25, 'quantity' => 40],
                 ['denominationInCents' => 10, 'quantity' => 40],
             ], JSON_THROW_ON_ERROR),
+            '--accepted-denominations-in-cents' => json_encode(
+                self::ACCEPTED_DENOMINATIONS_IN_CENTS,
+                JSON_THROW_ON_ERROR,
+            ),
         ]);
 
         return $id;
@@ -230,7 +278,23 @@ final class VendingMachineCommandTest extends TestCase
             'id' => VendingMachineId::generate()->toString(),
             '--stock' => '[]',
             '--cash-reserve' => '[]',
+            '--accepted-denominations-in-cents' => json_encode(
+                self::ACCEPTED_DENOMINATIONS_IN_CENTS,
+                JSON_THROW_ON_ERROR,
+            ),
         ]));
+    }
+
+    /**
+     * @param list<int> $acceptedDenominationsInCents
+     *
+     * @return array<string, string>
+     */
+    private function provisionInput(array $acceptedDenominationsInCents = self::ACCEPTED_DENOMINATIONS_IN_CENTS): array
+    {
+        return [
+            '--accepted-denominations-in-cents' => json_encode($acceptedDenominationsInCents, JSON_THROW_ON_ERROR),
+        ];
     }
 
     private function command(ContainerInterface $container, string $commandClass): Command
@@ -248,6 +312,7 @@ final class VendingMachineCommandTest extends TestCase
      *
      * @return array{
      *     id: string,
+     *     acceptedDenominationsInCents: list<int>,
      *     selectorCode: string,
      *     priceInCents: int,
      *     change: list<int>,
@@ -262,6 +327,7 @@ final class VendingMachineCommandTest extends TestCase
     {
         /** @var array{
          *     id: string,
+         *     acceptedDenominationsInCents: list<int>,
          *     selectorCode: string,
          *     priceInCents: int,
          *     change: list<int>,

@@ -12,6 +12,7 @@ use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachi
 use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachineHandler;
 use App\VendingMachine\Domain\Exception\InvalidDenominationException;
 use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
+use App\VendingMachine\Domain\Model\AcceptedDenominations;
 use App\VendingMachine\Domain\Model\VendingMachineId;
 use App\VendingMachine\Infrastructure\Persistence\Mongo\MongoVendingMachineRepository;
 use App\VendingMachine\Infrastructure\ReadModel\Redis\RedisVendingMachineStateReadModelRepository;
@@ -23,6 +24,9 @@ use PHPUnit\Framework\TestCase;
  */
 final class InsertCoinTest extends TestCase
 {
+    /** @var list<int> */
+    private const ACCEPTED_DENOMINATIONS_IN_CENTS = [5, 10, 25, 100];
+
     private MongoVendingMachineRepository $repository;
 
     private RedisVendingMachineStateReadModelRepository $readModel;
@@ -41,7 +45,7 @@ final class InsertCoinTest extends TestCase
 
     public function test_inserted_coins_accumulate_in_the_write_model_and_the_projection(): void
     {
-        $id = ($this->provision)(new ProvisionVendingMachine())->id();
+        $id = ($this->provision)(new ProvisionVendingMachine($this->accepted()))->id();
 
         ($this->insertCoin)(InsertCoin::fromInput($id, 25));
         ($this->insertCoin)(InsertCoin::fromInput($id, 25));
@@ -53,14 +57,20 @@ final class InsertCoinTest extends TestCase
         self::assertSame(150, $stored->state()->insertedFunds->amount()->amountInCents());
 
         self::assertSame(
-            ['id' => $id, 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 150],
+            [
+                'id' => $id,
+                'acceptedDenominationsInCents' => self::ACCEPTED_DENOMINATIONS_IN_CENTS,
+                'stock' => [],
+                'cashReserve' => [],
+                'insertedFundsInCents' => 150,
+            ],
             $this->readModel->get($id),
         );
     }
 
     public function test_a_rejected_denomination_changes_neither_the_write_model_nor_the_projection(): void
     {
-        $id = ($this->provision)(new ProvisionVendingMachine())->id();
+        $id = ($this->provision)(new ProvisionVendingMachine($this->accepted()))->id();
 
         ($this->insertCoin)(InsertCoin::fromInput($id, 25));
 
@@ -77,7 +87,13 @@ final class InsertCoinTest extends TestCase
         self::assertSame(25, $stored->state()->insertedFunds->amount()->amountInCents());
 
         self::assertSame(
-            ['id' => $id, 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 25],
+            [
+                'id' => $id,
+                'acceptedDenominationsInCents' => self::ACCEPTED_DENOMINATIONS_IN_CENTS,
+                'stock' => [],
+                'cashReserve' => [],
+                'insertedFundsInCents' => 25,
+            ],
             $this->readModel->get($id),
         );
     }
@@ -87,5 +103,10 @@ final class InsertCoinTest extends TestCase
         $this->expectException(VendingMachineNotFoundException::class);
 
         ($this->insertCoin)(InsertCoin::fromInput(VendingMachineId::generate()->toString(), 25));
+    }
+
+    private function accepted(): AcceptedDenominations
+    {
+        return AcceptedDenominations::fromCents(self::ACCEPTED_DENOMINATIONS_IN_CENTS);
     }
 }

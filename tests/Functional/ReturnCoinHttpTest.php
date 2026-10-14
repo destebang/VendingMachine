@@ -14,6 +14,9 @@ use Symfony\Component\Routing\RouteCollection;
 
 final class ReturnCoinHttpTest extends TestCase
 {
+    /** @var list<int> */
+    private const ACCEPTED_DENOMINATIONS_IN_CENTS = [5, 10, 25, 100];
+
     private HttpApplication $application;
 
     protected function setUp(): void
@@ -47,6 +50,8 @@ final class ReturnCoinHttpTest extends TestCase
             $this->payload($response),
         );
 
+        self::assertSame(self::ACCEPTED_DENOMINATIONS_IN_CENTS, $this->state($id)['acceptedDenominationsInCents']);
+
         self::assertSame(0, $this->state($id)['insertedFundsInCents']);
     }
 
@@ -77,7 +82,15 @@ final class ReturnCoinHttpTest extends TestCase
 
     private function provisionMachine(): string
     {
-        $response = $this->application->handle(Request::create('/vending-machines', 'POST'));
+        $response = $this->application->handle(Request::create(
+            '/vending-machines',
+            'POST',
+            [],
+            [],
+            [],
+            ['CONTENT_TYPE' => 'application/json'],
+            json_encode(['acceptedDenominationsInCents' => self::ACCEPTED_DENOMINATIONS_IN_CENTS], JSON_THROW_ON_ERROR),
+        ));
 
         return $this->payload($response)['id'];
     }
@@ -105,6 +118,7 @@ final class ReturnCoinHttpTest extends TestCase
     /**
      * @return array{
      *     id: string,
+     *     acceptedDenominationsInCents: list<int>,
      *     selectorCode: string,
      *     priceInCents: int,
      *     change: list<int>,
@@ -126,6 +140,7 @@ final class ReturnCoinHttpTest extends TestCase
      *
      * @return array{
      *     id: string,
+     *     acceptedDenominationsInCents: list<int>,
      *     selectorCode: string,
      *     priceInCents: int,
      *     change: list<int>,
@@ -140,6 +155,7 @@ final class ReturnCoinHttpTest extends TestCase
     {
         /** @var array{
          *     id: string,
+         *     acceptedDenominationsInCents: list<int>,
          *     selectorCode: string,
          *     priceInCents: int,
          *     change: list<int>,

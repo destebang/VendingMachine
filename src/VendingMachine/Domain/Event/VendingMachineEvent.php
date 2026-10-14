@@ -41,6 +41,7 @@ abstract readonly class VendingMachineEvent implements DomainEvent
      *
      * @return array{
      *     id: string,
+     *     acceptedDenominationsInCents: list<int>,
      *     stock: list<array{selectorCode: string, priceInCents: int, stock: int}>,
      *     cashReserve: list<array{denominationInCents: int, quantity: int}>,
      *     insertedFunds: array{denominationsInCents: list<int>},
@@ -68,6 +69,7 @@ abstract readonly class VendingMachineEvent implements DomainEvent
 
         return [
             'id' => $this->state->id->toString(),
+            'acceptedDenominationsInCents' => $this->state->acceptedDenominations->denominationsInCents(),
             'stock' => $stock,
             'cashReserve' => $cashReserve,
             'insertedFunds' => [

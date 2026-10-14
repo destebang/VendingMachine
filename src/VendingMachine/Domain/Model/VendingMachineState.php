@@ -16,6 +16,7 @@ final readonly class VendingMachineState
 {
     public function __construct(
         public VendingMachineId $id,
+        public AcceptedDenominations $acceptedDenominations,
         public Stock $stock,
         public CashReserve $cashReserve,
         public InsertedFunds $insertedFunds,

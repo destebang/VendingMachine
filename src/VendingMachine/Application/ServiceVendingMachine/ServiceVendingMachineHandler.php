@@ -27,7 +27,7 @@ final class ServiceVendingMachineHandler
     {
         $vendingMachine = $this->vendingMachineRepository->get($command->vendingMachineId);
 
-        $vendingMachine->service($command->stock, $command->cashReserve);
+        $vendingMachine->service($command->stock, $command->cashReserve, $command->acceptedDenominations);
 
         $this->vendingMachineRepository->save($vendingMachine);
 

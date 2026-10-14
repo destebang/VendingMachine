@@ -6,6 +6,7 @@ namespace App\Tests\Integration\VendingMachine\Infrastructure;
 
 use App\Kernel\DocumentManagerFactory;
 use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
+use App\VendingMachine\Domain\Model\AcceptedDenominations;
 use App\VendingMachine\Domain\Model\CashReserve;
 use App\VendingMachine\Domain\Model\InsertedFunds;
 use App\VendingMachine\Domain\Model\Money;
@@ -25,7 +26,7 @@ final class MongoVendingMachineRepositoryTest extends TestCase
 
         self::assertNull($repository->find($id));
 
-        $repository->save(VendingMachine::create($id));
+        $repository->save(VendingMachine::create($id, AcceptedDenominations::fromCents([5, 10, 25, 100])));
 
         $found = $repository->find($id);
 
@@ -40,6 +41,7 @@ final class MongoVendingMachineRepositoryTest extends TestCase
 
         $repository->save(VendingMachine::reconstitute(
             $id,
+            AcceptedDenominations::fromCents([10, 50, 100]),
             InsertedFunds::fromDenominations([25, 25]),
             Stock::fromProducts([
                 Product::create('WATER', Money::fromCents(65), 4),
@@ -52,6 +54,7 @@ final class MongoVendingMachineRepositoryTest extends TestCase
         $found = $repository->find($id);
 
         self::assertNotNull($found);
+        self::assertSame([10, 50, 100], $found->state()->acceptedDenominations->denominationsInCents());
         self::assertSame(50, $found->state()->insertedFunds->amount()->amountInCents());
         self::assertSame([25, 25], $found->state()->insertedFunds->denominationsInCents());
         self::assertSame([100 => 5, 50 => 3], $found->state()->cashReserve->counts());
@@ -65,7 +68,7 @@ final class MongoVendingMachineRepositoryTest extends TestCase
         $repository = new MongoVendingMachineRepository(DocumentManagerFactory::create());
         $id = VendingMachineId::generate();
 
-        $repository->save(VendingMachine::create($id));
+        $repository->save(VendingMachine::create($id, AcceptedDenominations::fromCents([5, 10, 25, 100])));
 
         $found = $repository->get($id);
 

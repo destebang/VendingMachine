@@ -16,6 +16,7 @@ use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachine;
 use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachineHandler;
 use App\VendingMachine\Domain\Exception\InsufficientChangeAvailableException;
 use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
+use App\VendingMachine\Domain\Model\AcceptedDenominations;
 use App\VendingMachine\Domain\Model\VendingMachineId;
 use App\VendingMachine\Infrastructure\Persistence\Mongo\MongoVendingMachineRepository;
 use App\VendingMachine\Infrastructure\ReadModel\Redis\RedisVendingMachineStateReadModelRepository;
@@ -27,6 +28,9 @@ use PHPUnit\Framework\TestCase;
  */
 final class SelectItemTest extends TestCase
 {
+    /** @var list<int> */
+    private const ACCEPTED_DENOMINATIONS_IN_CENTS = [5, 10, 25, 100];
+
     private MongoVendingMachineRepository $repository;
 
     private RedisVendingMachineStateReadModelRepository $readModel;
@@ -72,6 +76,7 @@ final class SelectItemTest extends TestCase
         self::assertSame(
             [
                 'id' => $id,
+                'acceptedDenominationsInCents' => self::ACCEPTED_DENOMINATIONS_IN_CENTS,
                 'stock' => [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 9]],
                 'cashReserve' => [
                     ['denominationInCents' => 25, 'quantity' => 39],
@@ -86,12 +91,13 @@ final class SelectItemTest extends TestCase
 
     public function test_an_insufficient_change_rejection_refunds_the_balance_in_both_stores(): void
     {
-        $id = ($this->provision)(new ProvisionVendingMachine())->id();
+        $id = ($this->provision)(new ProvisionVendingMachine($this->accepted()))->id();
 
         ($this->service)(ServiceVendingMachine::fromInput(
             $id,
             [['selectorCode' => 'WATER', 'priceInCents' => 65, 'stock' => 10]],
             [],
+            self::ACCEPTED_DENOMINATIONS_IN_CENTS,
         ));
 
         ($this->insertCoin)(InsertCoin::fromInput($id, 100));
@@ -128,7 +134,7 @@ final class SelectItemTest extends TestCase
      */
     private function servicedMachine(): string
     {
-        $id = ($this->provision)(new ProvisionVendingMachine())->id();
+        $id = ($this->provision)(new ProvisionVendingMachine($this->accepted()))->id();
 
         ($this->service)(ServiceVendingMachine::fromInput(
             $id,
@@ -138,8 +144,14 @@ final class SelectItemTest extends TestCase
                 ['denominationInCents' => 10, 'quantity' => 40],
                 ['denominationInCents' => 5, 'quantity' => 40],
             ],
+            self::ACCEPTED_DENOMINATIONS_IN_CENTS,
         ));
 
         return $id;
+    }
+
+    private function accepted(): AcceptedDenominations
+    {
+        return AcceptedDenominations::fromCents(self::ACCEPTED_DENOMINATIONS_IN_CENTS);
     }
 }

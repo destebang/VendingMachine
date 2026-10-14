@@ -6,6 +6,7 @@ namespace App\VendingMachine\Application\HealthCheck;
 
 use App\Shared\Application\Bus\Attribute\CommandHandler;
 use App\VendingMachine\Application\ReadModel\VendingMachineStateReadModelRepository;
+use App\VendingMachine\Domain\Model\AcceptedDenominations;
 use App\VendingMachine\Domain\Model\VendingMachine;
 use App\VendingMachine\Domain\Model\VendingMachineId;
 use App\VendingMachine\Domain\Repository\VendingMachineRepository;
@@ -34,7 +35,10 @@ final class HealthCheckHandler
     {
         try {
             $id = VendingMachineId::generate();
-            $this->vendingMachineRepository->save(VendingMachine::create($id));
+            // A representative coin set: the health check only needs a machine
+            // that can round-trip, not any particular configuration.
+            $machine = VendingMachine::create($id, AcceptedDenominations::fromCents([5, 10, 25, 100]));
+            $this->vendingMachineRepository->save($machine);
 
             return $this->vendingMachineRepository->find($id) !== null;
         } catch (Throwable) {

@@ -15,8 +15,8 @@ use Throwable;
 
 /**
  * `POST /vending-machines/{id}/service` — the technician declares the machine's
- * true stock and cash reserve (replace semantics) and gets the resulting state
- * back.
+ * true stock, cash reserve and accepted denominations (replace semantics) and
+ * gets the resulting state back.
  */
 final class ServiceVendingMachineController
 {
@@ -27,10 +27,15 @@ final class ServiceVendingMachineController
     public function __invoke(Request $request, string $id): JsonResponse
     {
         try {
-            /** @var array{stock?: list<array{selectorCode: string, priceInCents: int, stock: int}>, cashReserve?: list<array{denominationInCents: int, quantity: int}>} $payload */
+            /** @var array{stock?: list<array{selectorCode: string, priceInCents: int, stock: int}>, cashReserve?: list<array{denominationInCents: int, quantity: int}>, acceptedDenominationsInCents?: list<int>} $payload */
             $payload = json_decode($request->getContent(), associative: true, flags: JSON_THROW_ON_ERROR);
 
-            $command = ServiceVendingMachine::fromInput($id, $payload['stock'] ?? [], $payload['cashReserve'] ?? []);
+            $command = ServiceVendingMachine::fromInput(
+                $id,
+                $payload['stock'] ?? [],
+                $payload['cashReserve'] ?? [],
+                $payload['acceptedDenominationsInCents'] ?? [],
+            );
         } catch (Throwable $exception) {
             return new JsonResponse([
                 'error' => 'InvalidRequest',

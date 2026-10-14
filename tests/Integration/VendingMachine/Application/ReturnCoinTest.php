@@ -13,6 +13,7 @@ use App\VendingMachine\Application\ProvisionVendingMachine\ProvisionVendingMachi
 use App\VendingMachine\Application\ReturnCoin\ReturnCoin;
 use App\VendingMachine\Application\ReturnCoin\ReturnCoinHandler;
 use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
+use App\VendingMachine\Domain\Model\AcceptedDenominations;
 use App\VendingMachine\Domain\Model\VendingMachineId;
 use App\VendingMachine\Infrastructure\Persistence\Mongo\MongoVendingMachineRepository;
 use App\VendingMachine\Infrastructure\ReadModel\Redis\RedisVendingMachineStateReadModelRepository;
@@ -24,6 +25,9 @@ use PHPUnit\Framework\TestCase;
  */
 final class ReturnCoinTest extends TestCase
 {
+    /** @var list<int> */
+    private const ACCEPTED_DENOMINATIONS_IN_CENTS = [5, 10, 25, 100];
+
     private MongoVendingMachineRepository $repository;
 
     private RedisVendingMachineStateReadModelRepository $readModel;
@@ -45,7 +49,7 @@ final class ReturnCoinTest extends TestCase
 
     public function test_returning_hands_back_the_inserted_coins_and_resets_both_stores(): void
     {
-        $id = ($this->provision)(new ProvisionVendingMachine())->id();
+        $id = ($this->provision)(new ProvisionVendingMachine($this->accepted()))->id();
 
         ($this->insertCoin)(InsertCoin::fromInput($id, 25));
         ($this->insertCoin)(InsertCoin::fromInput($id, 10));
@@ -62,14 +66,20 @@ final class ReturnCoinTest extends TestCase
         self::assertTrue($stored->state()->insertedFunds->isEmpty());
 
         self::assertSame(
-            ['id' => $id, 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 0],
+            [
+                'id' => $id,
+                'acceptedDenominationsInCents' => self::ACCEPTED_DENOMINATIONS_IN_CENTS,
+                'stock' => [],
+                'cashReserve' => [],
+                'insertedFundsInCents' => 0,
+            ],
             $this->readModel->get($id),
         );
     }
 
     public function test_returning_with_nothing_inserted_is_a_no_op(): void
     {
-        $id = ($this->provision)(new ProvisionVendingMachine())->id();
+        $id = ($this->provision)(new ProvisionVendingMachine($this->accepted()))->id();
 
         $result = ($this->returnCoin)(ReturnCoin::fromInput($id));
 
@@ -77,7 +87,13 @@ final class ReturnCoinTest extends TestCase
         self::assertSame(0, $result->state->insertedFundsInCents);
 
         self::assertSame(
-            ['id' => $id, 'stock' => [], 'cashReserve' => [], 'insertedFundsInCents' => 0],
+            [
+                'id' => $id,
+                'acceptedDenominationsInCents' => self::ACCEPTED_DENOMINATIONS_IN_CENTS,
+                'stock' => [],
+                'cashReserve' => [],
+                'insertedFundsInCents' => 0,
+            ],
             $this->readModel->get($id),
         );
     }
@@ -87,5 +103,10 @@ final class ReturnCoinTest extends TestCase
         $this->expectException(VendingMachineNotFoundException::class);
 
         ($this->returnCoin)(ReturnCoin::fromInput(VendingMachineId::generate()->toString()));
+    }
+
+    private function accepted(): AcceptedDenominations
+    {
+        return AcceptedDenominations::fromCents(self::ACCEPTED_DENOMINATIONS_IN_CENTS);
     }
 }

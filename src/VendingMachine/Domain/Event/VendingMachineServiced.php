@@ -14,6 +14,7 @@ final readonly class VendingMachineServiced extends VendingMachineEvent
     /**
      * @return array{state: array{
      *     id: string,
+     *     acceptedDenominationsInCents: list<int>,
      *     stock: list<array{selectorCode: string, priceInCents: int, stock: int}>,
      *     cashReserve: list<array{denominationInCents: int, quantity: int}>,
      *     insertedFunds: array{denominationsInCents: list<int>},

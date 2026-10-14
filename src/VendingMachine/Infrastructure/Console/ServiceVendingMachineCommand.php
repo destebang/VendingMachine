@@ -19,11 +19,12 @@ use Throwable;
 
 /**
  * CLI equivalent of `POST /vending-machines/{id}/service`: declares a machine's
- * true stock and cash reserve (replace semantics) and prints its state.
+ * true stock, cash reserve and accepted denominations (replace semantics) and
+ * prints its state.
  */
 #[AsCommand(
     name: 'app:vending-machine:service',
-    description: 'Sets a machine\'s stock and cash reserve (replace semantics).',
+    description: 'Sets a machine\'s stock, cash reserve and accepted denominations (replace semantics).',
 )]
 final class ServiceVendingMachineCommand extends Command
 {
@@ -50,6 +51,12 @@ final class ServiceVendingMachineCommand extends Command
             'JSON list of {"denominationInCents","quantity"}.',
             '[]',
         );
+        $this->addOption(
+            'accepted-denominations-in-cents',
+            null,
+            InputOption::VALUE_REQUIRED,
+            'JSON list of the accepted denominations in cents, e.g. [5,10,25,100].',
+        );
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -67,7 +74,14 @@ final class ServiceVendingMachineCommand extends Command
                 flags: JSON_THROW_ON_ERROR,
             );
 
-            $command = ServiceVendingMachine::fromInput($id, $stock, $cashReserve);
+            /** @var list<int> $acceptedDenominationsInCents */
+            $acceptedDenominationsInCents = json_decode(
+                (string) $input->getOption('accepted-denominations-in-cents'),
+                associative: true,
+                flags: JSON_THROW_ON_ERROR,
+            );
+
+            $command = ServiceVendingMachine::fromInput($id, $stock, $cashReserve, $acceptedDenominationsInCents);
         } catch (Throwable $exception) {
             $output->writeln(json_encode([
                 'error' => 'InvalidRequest',

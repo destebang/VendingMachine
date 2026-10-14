@@ -18,11 +18,13 @@ use App\VendingMachine\Domain\Model\VendingMachine;
 final class MachineStateView
 {
     /**
+     * @param list<int>                                                        $acceptedDenominationsInCents
      * @param list<array{selectorCode: string, priceInCents: int, stock: int}> $stock
      * @param list<array{denominationInCents: int, quantity: int}>            $cashReserve
      */
     public function __construct(
         public readonly string $id,
+        public readonly array $acceptedDenominationsInCents,
         public readonly array $stock,
         public readonly array $cashReserve,
         public readonly int $insertedFundsInCents,
@@ -48,6 +50,7 @@ final class MachineStateView
 
         return new self(
             id: $state->id->toString(),
+            acceptedDenominationsInCents: $state->acceptedDenominations->denominationsInCents(),
             stock: array_values($stock),
             cashReserve: $cashReserve,
             insertedFundsInCents: $state->insertedFunds->amount()->amountInCents(),
@@ -59,6 +62,9 @@ final class MachineStateView
      */
     public static function fromArray(array $state): self
     {
+        /** @var list<int> $acceptedDenominationsInCents */
+        $acceptedDenominationsInCents = $state['acceptedDenominationsInCents'] ?? [];
+
         /** @var list<array{selectorCode: string, priceInCents: int, stock: int}> $stock */
         $stock = $state['stock'] ?? [];
 
@@ -67,6 +73,7 @@ final class MachineStateView
 
         return new self(
             id: (string) ($state['id'] ?? ''),
+            acceptedDenominationsInCents: $acceptedDenominationsInCents,
             stock: $stock,
             cashReserve: $cashReserve,
             insertedFundsInCents: (int) ($state['insertedFundsInCents'] ?? 0),
@@ -76,6 +83,7 @@ final class MachineStateView
     /**
      * @return array{
      *     id: string,
+     *     acceptedDenominationsInCents: list<int>,
      *     stock: list<array{selectorCode: string, priceInCents: int, stock: int}>,
      *     cashReserve: list<array{denominationInCents: int, quantity: int}>,
      *     insertedFundsInCents: int
@@ -85,6 +93,7 @@ final class MachineStateView
     {
         return [
             'id' => $this->id,
+            'acceptedDenominationsInCents' => $this->acceptedDenominationsInCents,
             'stock' => $this->stock,
             'cashReserve' => $this->cashReserve,
             'insertedFundsInCents' => $this->insertedFundsInCents,

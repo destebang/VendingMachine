@@ -26,7 +26,7 @@ final class ProvisionVendingMachineHandler
 
     public function __invoke(ProvisionVendingMachine $command): ProvisionVendingMachineResult
     {
-        $vendingMachine = VendingMachine::create(VendingMachineId::generate());
+        $vendingMachine = VendingMachine::create(VendingMachineId::generate(), $command->acceptedDenominations);
         $state = $vendingMachine->state();
 
         $this->vendingMachineRepository->save($vendingMachine);

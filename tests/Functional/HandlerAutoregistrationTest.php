@@ -51,4 +51,18 @@ final class HandlerAutoregistrationTest extends TestCase
             'The QueryBus port must be backed by the Kernel adapter.',
         );
     }
+
+    public function test_the_write_side_is_backed_by_the_command_bus_port(): void
+    {
+        $container = ContainerFactory::create();
+
+        self::assertTrue(
+            $container->hasDefinition('App\\Kernel\\Bus\\MessengerCommandBus'),
+            'The CommandBus port must be backed by the Kernel adapter.',
+        );
+        self::assertTrue(
+            $container->hasDefinition('command.bus.middleware.handle_message'),
+            'The command bus middleware must stay in place.',
+        );
+    }
 }

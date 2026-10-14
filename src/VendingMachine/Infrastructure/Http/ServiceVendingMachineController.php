@@ -4,15 +4,13 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Infrastructure\Http;
 
+use App\Shared\Application\Bus\CommandBus;
 use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachine;
 use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachineResult;
 use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
 use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\Messenger\Exception\HandlerFailedException;
-use Symfony\Component\Messenger\HandleTrait;
-use Symfony\Component\Messenger\MessageBusInterface;
 use Throwable;
 
 /**
@@ -22,12 +20,9 @@ use Throwable;
  */
 final class ServiceVendingMachineController
 {
-    use HandleTrait;
-
-    public function __construct(MessageBusInterface $messageBus)
-    {
-        $this->messageBus = $messageBus;
-    }
+    public function __construct(
+        private readonly CommandBus $commandBus,
+    ) {}
 
     public function __invoke(Request $request, string $id): JsonResponse
     {
@@ -45,32 +40,19 @@ final class ServiceVendingMachineController
 
         try {
             /** @var ServiceVendingMachineResult $result */
-            $result = $this->handle($command);
-        } catch (HandlerFailedException $transportException) {
-            return $this->errorResponse($transportException);
-        }
-
-        return new JsonResponse($result->state->toArray());
-    }
-
-    private function errorResponse(HandlerFailedException $transportException): JsonResponse
-    {
-        $cause = $transportException->getPrevious() ?? $transportException;
-
-        if ($cause instanceof PendingTransactionInProgressException) {
+            $result = $this->commandBus->handle($command);
+        } catch (PendingTransactionInProgressException $exception) {
             return new JsonResponse([
                 'error' => 'PendingTransactionInProgress',
-                'message' => $cause->getMessage(),
+                'message' => $exception->getMessage(),
             ], JsonResponse::HTTP_CONFLICT);
-        }
-
-        if ($cause instanceof VendingMachineNotFoundException) {
+        } catch (VendingMachineNotFoundException $exception) {
             return new JsonResponse([
                 'error' => 'VendingMachineNotFound',
-                'message' => $cause->getMessage(),
+                'message' => $exception->getMessage(),
             ], JsonResponse::HTTP_NOT_FOUND);
         }
 
-        throw $transportException;
+        return new JsonResponse($result->state->toArray());
     }
 }

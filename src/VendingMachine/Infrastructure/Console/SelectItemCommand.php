@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Infrastructure\Console;
 
+use App\Shared\Application\Bus\CommandBus;
 use App\VendingMachine\Application\SelectItem\SelectItem;
 use App\VendingMachine\Application\SelectItem\SelectItemResult;
 use App\VendingMachine\Domain\Exception\InsufficientChangeAvailableException;
@@ -15,9 +16,6 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Messenger\Exception\HandlerFailedException;
-use Symfony\Component\Messenger\HandleTrait;
-use Symfony\Component\Messenger\MessageBusInterface;
 use Throwable;
 
 /**
@@ -30,13 +28,10 @@ use Throwable;
 )]
 final class SelectItemCommand extends Command
 {
-    use HandleTrait;
-
-    public function __construct(MessageBusInterface $messageBus)
-    {
+    public function __construct(
+        private readonly CommandBus $commandBus,
+    ) {
         parent::__construct();
-
-        $this->messageBus = $messageBus;
     }
 
     protected function configure(): void
@@ -63,32 +58,29 @@ final class SelectItemCommand extends Command
 
         try {
             /** @var SelectItemResult $result */
-            $result = $this->handle($command);
-        } catch (HandlerFailedException $transportException) {
-            $cause = $transportException->getPrevious() ?? $transportException;
-
-            $error = match (true) {
-                $cause instanceof InsufficientFundsException => 'InsufficientFunds',
-                $cause instanceof OutOfStockException => 'OutOfStock',
-                $cause instanceof InsufficientChangeAvailableException => 'InsufficientChangeAvailable',
-                $cause instanceof VendingMachineNotFoundException => 'VendingMachineNotFound',
-                default => null,
-            };
-
-            if ($error !== null) {
-                $output->writeln(json_encode([
-                    'error' => $error,
-                    'message' => $cause->getMessage(),
-                ], JSON_THROW_ON_ERROR));
-
-                return Command::FAILURE;
-            }
-
-            throw $transportException;
+            $result = $this->commandBus->handle($command);
+        } catch (InsufficientFundsException $exception) {
+            return $this->rejection($output, 'InsufficientFunds', $exception);
+        } catch (OutOfStockException $exception) {
+            return $this->rejection($output, 'OutOfStock', $exception);
+        } catch (InsufficientChangeAvailableException $exception) {
+            return $this->rejection($output, 'InsufficientChangeAvailable', $exception);
+        } catch (VendingMachineNotFoundException $exception) {
+            return $this->rejection($output, 'VendingMachineNotFound', $exception);
         }
 
         $output->writeln(json_encode($result->toArray(), JSON_THROW_ON_ERROR));
 
         return Command::SUCCESS;
+    }
+
+    private function rejection(OutputInterface $output, string $error, Throwable $exception): int
+    {
+        $output->writeln(json_encode([
+            'error' => $error,
+            'message' => $exception->getMessage(),
+        ], JSON_THROW_ON_ERROR));
+
+        return Command::FAILURE;
     }
 }

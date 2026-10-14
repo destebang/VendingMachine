@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Infrastructure\Console;
 
+use App\Shared\Application\Bus\CommandBus;
 use App\VendingMachine\Application\ReturnCoin\ReturnCoin;
 use App\VendingMachine\Application\ReturnCoin\ReturnCoinResult;
 use App\VendingMachine\Domain\Exception\VendingMachineNotFoundException;
@@ -12,9 +13,6 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Messenger\Exception\HandlerFailedException;
-use Symfony\Component\Messenger\HandleTrait;
-use Symfony\Component\Messenger\MessageBusInterface;
 use Throwable;
 
 /**
@@ -27,13 +25,10 @@ use Throwable;
 )]
 final class ReturnCoinCommand extends Command
 {
-    use HandleTrait;
-
-    public function __construct(MessageBusInterface $messageBus)
-    {
+    public function __construct(
+        private readonly CommandBus $commandBus,
+    ) {
         parent::__construct();
-
-        $this->messageBus = $messageBus;
     }
 
     protected function configure(): void
@@ -56,20 +51,14 @@ final class ReturnCoinCommand extends Command
 
         try {
             /** @var ReturnCoinResult $result */
-            $result = $this->handle($command);
-        } catch (HandlerFailedException $transportException) {
-            $cause = $transportException->getPrevious() ?? $transportException;
+            $result = $this->commandBus->handle($command);
+        } catch (VendingMachineNotFoundException $exception) {
+            $output->writeln(json_encode([
+                'error' => 'VendingMachineNotFound',
+                'message' => $exception->getMessage(),
+            ], JSON_THROW_ON_ERROR));
 
-            if ($cause instanceof VendingMachineNotFoundException) {
-                $output->writeln(json_encode([
-                    'error' => 'VendingMachineNotFound',
-                    'message' => $cause->getMessage(),
-                ], JSON_THROW_ON_ERROR));
-
-                return Command::FAILURE;
-            }
-
-            throw $transportException;
+            return Command::FAILURE;
         }
 
         $output->writeln(json_encode($result->toArray(), JSON_THROW_ON_ERROR));

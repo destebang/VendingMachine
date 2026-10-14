@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Infrastructure\Console;
 
+use App\Shared\Application\Bus\CommandBus;
 use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachine;
 use App\VendingMachine\Application\ServiceVendingMachine\ServiceVendingMachineResult;
 use App\VendingMachine\Domain\Exception\PendingTransactionInProgressException;
@@ -14,9 +15,7 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Messenger\Exception\HandlerFailedException;
-use Symfony\Component\Messenger\HandleTrait;
-use Symfony\Component\Messenger\MessageBusInterface;
+use Throwable;
 
 /**
  * CLI equivalent of `POST /vending-machines/{id}/service`: declares a machine's
@@ -28,13 +27,10 @@ use Symfony\Component\Messenger\MessageBusInterface;
 )]
 final class ServiceVendingMachineCommand extends Command
 {
-    use HandleTrait;
-
-    public function __construct(MessageBusInterface $messageBus)
-    {
+    public function __construct(
+        private readonly CommandBus $commandBus,
+    ) {
         parent::__construct();
-
-        $this->messageBus = $messageBus;
     }
 
     protected function configure(): void
@@ -72,7 +68,7 @@ final class ServiceVendingMachineCommand extends Command
             );
 
             $command = ServiceVendingMachine::fromInput($id, $stock, $cashReserve);
-        } catch (\Throwable $exception) {
+        } catch (Throwable $exception) {
             $output->writeln(json_encode([
                 'error' => 'InvalidRequest',
                 'message' => $exception->getMessage(),
@@ -83,29 +79,21 @@ final class ServiceVendingMachineCommand extends Command
 
         try {
             /** @var ServiceVendingMachineResult $result */
-            $result = $this->handle($command);
-        } catch (HandlerFailedException $transportException) {
-            $cause = $transportException->getPrevious() ?? $transportException;
+            $result = $this->commandBus->handle($command);
+        } catch (PendingTransactionInProgressException $exception) {
+            $output->writeln(json_encode([
+                'error' => 'PendingTransactionInProgress',
+                'message' => $exception->getMessage(),
+            ], JSON_THROW_ON_ERROR));
 
-            if ($cause instanceof PendingTransactionInProgressException) {
-                $output->writeln(json_encode([
-                    'error' => 'PendingTransactionInProgress',
-                    'message' => $cause->getMessage(),
-                ], JSON_THROW_ON_ERROR));
+            return Command::FAILURE;
+        } catch (VendingMachineNotFoundException $exception) {
+            $output->writeln(json_encode([
+                'error' => 'VendingMachineNotFound',
+                'message' => $exception->getMessage(),
+            ], JSON_THROW_ON_ERROR));
 
-                return Command::FAILURE;
-            }
-
-            if ($cause instanceof VendingMachineNotFoundException) {
-                $output->writeln(json_encode([
-                    'error' => 'VendingMachineNotFound',
-                    'message' => $cause->getMessage(),
-                ], JSON_THROW_ON_ERROR));
-
-                return Command::FAILURE;
-            }
-
-            throw $transportException;
+            return Command::FAILURE;
         }
 
         $output->writeln(json_encode($result->state->toArray(), JSON_THROW_ON_ERROR));

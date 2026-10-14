@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Sales\Infrastructure\Http\ListSalesController;
 use App\VendingMachine\Infrastructure\Http\GetVendingMachineController;
 use App\VendingMachine\Infrastructure\Http\HealthCheckController;
 use App\VendingMachine\Infrastructure\Http\InsertCoinController;
@@ -53,6 +54,12 @@ $routes->add('return_coin', new Route(
 $routes->add('get_vending_machine', new Route(
     path: '/vending-machines/{id}',
     defaults: ['_controller' => GetVendingMachineController::class],
+    methods: ['GET'],
+));
+
+$routes->add('list_sales', new Route(
+    path: '/sales',
+    defaults: ['_controller' => ListSalesController::class],
     methods: ['GET'],
 ));
 

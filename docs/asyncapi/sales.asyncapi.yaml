@@ -1,0 +1,83 @@
+asyncapi: 3.0.0
+
+info:
+  title: Sales
+  version: 1.0.0
+  description: |
+    The Sales context's consumer view of the vending machine's published
+    language: it receives `vending_machine.item_vended.v1` and registers a
+    Sale. The message itself is the vending machine's contract — this document
+    only pins the receive operation and the durable queue the Sales worker
+    binds to it, and reuses the shared component schemas.
+
+    Versioning policy: as a consumer, Sales depends on the `v1` version of the
+    message. Within `v1`, the producer may only add fields, so this consumer
+    keeps working when one appears; a breaking change arrives as a new `.v2`
+    channel, never as an edit to `v1`.
+  contact:
+    name: Sales
+  license:
+    name: Proprietary
+
+servers:
+  local:
+    host: 'rabbitmq:5672'
+    protocol: amqp
+    description: >-
+      The local RabbitMQ broker. The Sales worker binds its durable queue
+      `sales.item_vended` to the vending machine's topic exchange
+      `vending_machine.integration` with the `vending_machine.item_vended.v1`
+      routing key. A message whose retries are exhausted is dead-lettered to
+      `sales.item_vended.dlq`.
+
+channels:
+  itemVendedV1:
+    address: vending_machine.item_vended.v1
+    title: Item vended (v1)
+    description: >-
+      The vending machine's `vending_machine.item_vended.v1` routing key, bound
+      to the durable queue `sales.item_vended` on the topic exchange
+      `vending_machine.integration`. Received once per sale the vending machine
+      reports, delivered at-least-once, so the consumer deduplicates on the
+      envelope `id`.
+    messages:
+      itemVendedV1:
+        $ref: '#/components/messages/itemVendedV1'
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: sales.item_vended
+          durable: true
+
+operations:
+  receiveItemVendedV1:
+    action: receive
+    title: Register a sale from an item vended (v1) message
+    description: >-
+      The Sales worker consumes `sales.item_vended`, decodes the message into
+      its own `ItemVendedV1Received` and dispatches a `RegisterSale` command. A
+      failure is retried with a backoff and, once the retries are exhausted,
+      dead-lettered to `sales.item_vended.dlq`.
+    channel:
+      $ref: '#/channels/itemVendedV1'
+    messages:
+      - $ref: '#/channels/itemVendedV1/messages/itemVendedV1'
+
+components:
+  messages:
+    itemVendedV1:
+      name: itemVendedV1
+      title: An item was vended
+      summary: A customer bought a product; the machine handed it over and paid any change.
+      description: >-
+        The vending machine's `vending_machine.item_vended.v1` message, reusing
+        the producer's shared component schema. The envelope `id` is the id of
+        the causing domain event; delivery is at-least-once, so Sales
+        deduplicates on it.
+      contentType: application/json
+      correlationId:
+        description: Correlates the message back to the work that caused it.
+        location: $message.payload#/correlationId
+      payload:
+        $ref: './components/schemas/item-vended-v1-message.yaml'

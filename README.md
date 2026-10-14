@@ -5,7 +5,7 @@ A vending machine, built on standalone Symfony components (no
 Redis-backed read model, and integration events published to RabbitMQ.
 
 **Current state: the full customer journey, plus the first integration
-event.** The whole stack boots end-to-end —
+event and its first consumer.** The whole stack boots end-to-end —
 HTTP, CLI, MongoDB, Redis, RabbitMQ, dependency injection, a Messenger command
 bus, and a
 three-layer test suite — and carries the customer-facing use cases: provision a
@@ -16,10 +16,13 @@ hand back any change due, and return every inserted coin before buying. The writ
 Redis, and the two are kept in step by domain events published synchronously
 after each command. When an item is vended, a versioned
 `vending_machine.item_vended.v1` message is reliably published to a
-RabbitMQ topic exchange through an embedded outbox and a polling relay. The
-published `item_vended.v1` contract is documented spec-first with AsyncAPI 3.0
+RabbitMQ topic exchange through an embedded outbox and a polling relay. A second
+bounded context, **Sales**, consumes that message from its own queue and
+registers a Sale, depending only on the published contract — never on the
+vending machine's code. The published `item_vended.v1` contract is documented
+spec-first with AsyncAPI 3.0 from both sides
 (see [Integration contract](#integration-contract-asyncapi)) and kept honest
-by a contract test, and a
+by contract tests, and a
 health check still round-trips data through both stores.
 
 ## Requirements
@@ -35,11 +38,12 @@ health check still round-trips data through both stores.
 docker compose up -d --build
 ```
 
-This starts five services: `app` (PHP, serving HTTP on `:8000`),
+This starts six services: `app` (PHP, serving HTTP on `:8000`),
 `mongodb`, `redis`, `rabbitmq` (AMQP on `:5672`, management UI on
-[http://localhost:15672](http://localhost:15672), guest/guest), and
+[http://localhost:15672](http://localhost:15672), guest/guest),
 `outbox-relay` (publishes pending outbox events as integration events; watch
-it with `docker compose logs -f outbox-relay`).
+it with `docker compose logs -f outbox-relay`) and `sales-worker` (the Sales
+context's consumer; watch it with `docker compose logs -f sales-worker`).
 
 Check that everything is wired up correctly, via HTTP:
 
@@ -127,6 +131,16 @@ curl -s -X POST http://localhost:8000/vending-machines/$ID/return-coin
 # -> {"id":"...","returnedCoins":[10,10],"insertedFundsInCents":0}
 ```
 
+The **Sales** context consumes the vended-item messages the relay publishes and
+registers one Sale per message. List them (a demo read; the worker must have
+consumed the message first, which happens within a moment):
+
+```bash
+curl -s http://localhost:8000/sales
+# -> [{"saleId":"...","vendingMachineId":"...","selectorCode":"WATER",
+#      "priceInCents":65,"soldAt":"2026-10-14T10:30:00+00:00","sourceEventId":"..."}]
+```
+
 The same use cases are available through the CLI, dispatching the exact same
 commands through the same bus:
 
@@ -172,6 +186,11 @@ docker compose exec -e MONGO_DB=vending_test -e REDIS_URL=redis://redis:6379/1 \
   app vendor/bin/phpunit
 ```
 
+The integration suite drives its own outbox relay and Sales worker against the
+real broker, so stop the long-running worker services first — they would
+otherwise compete for the same queues:
+`docker compose stop outbox-relay sales-worker`.
+
 * **Unit** (`tests/Unit`) — domain value objects and entities
   (`Money`, `Denomination`, `AcceptedDenominations`, `Product`, `ChangeDue`,
   `InsertedFunds`, `VendingMachine`), exercised in isolation with no I/O,
@@ -186,7 +205,9 @@ docker compose exec -e MONGO_DB=vending_test -e REDIS_URL=redis://redis:6379/1 \
   event translator and the JSON envelope serializer are covered here too:
   the exact published envelope, and which events are (not) translated — as is
   the AsyncAPI contract: the serialized message and the spec's own example are
-  both validated against the payload schema from `docs/asyncapi`.
+  both validated against the payload schema from `docs/asyncapi`, and the
+  Sales consumer contract test decodes the producer spec's own example into
+  `ItemVendedV1Received`.
 * **Integration** (`tests/Integration`) — the MongoDB repository, the Redis
   read-model repository and the
   provision/service/insert-coin/select-item/return-coin use cases dispatched
@@ -198,7 +219,11 @@ docker compose exec -e MONGO_DB=vending_test -e REDIS_URL=redis://redis:6379/1 \
   run against a real RabbitMQ (a test queue bound to the routing key) proving
   exactly one `item_vended.v1` message is published per sale, that other
   events are dropped from the outbox unpublished, and that a failed publish
-  stays pending and is retried.
+  stays pending and is retried. The Sales consumer is covered end-to-end the
+  same way: a vended item reaches `sales.item_vended`, the worker registers
+  exactly one Sale, re-delivering the message registers no second Sale, and a
+  message whose handling fails is dead-lettered to `sales.item_vended.dlq`
+  once its retries are exhausted.
 * **Functional** (`tests/Functional`) — boots the real HTTP application and the
   real CLI commands and exercises provisioning, servicing, inserting coins,
   reading state, selecting products and returning inserted coins (plus the
@@ -260,17 +285,24 @@ message, its JSON envelope and its AMQP bindings — is documented spec-first in
 * [`vending-machine.asyncapi.yaml`](./docs/asyncapi/vending-machine.asyncapi.yaml)
   — the producer document (AsyncAPI 3.0): the channel, the `send` operation,
   the message with its correlation id, and its payload schema and example.
+* [`sales.asyncapi.yaml`](./docs/asyncapi/sales.asyncapi.yaml)
+  — the Sales consumer document (AsyncAPI 3.0): a `receive` operation on the
+  same `vending_machine.item_vended.v1` message, with the `sales.item_vended`
+  queue the worker binds to it. It reuses the shared component schema rather
+  than restating the payload.
 * [`components/schemas/`](./docs/asyncapi/components/schemas) — the reusable
-  schemas the document (and, later, consumer documents) pull in through `$ref`:
-  the shared integration event `envelope`, the item-vended `data`, and the
-  primitive `cents` and `selector-code` types.
+  schemas both documents pull in through `$ref`: the shared integration event
+  `envelope`, the item-vended `data`, and the primitive `cents` and
+  `selector-code` types.
 
 The spec is the source of truth for the contract, and the code is kept honest
-with a contract test (`ItemVendedV1ContractTest`): it serialises an
-`ItemVendedV1` with the real `JsonEnvelopeSerializer` and validates the result
-against the payload schema from the spec, and it validates the spec's own
-example too. Renaming or removing a field on either side — the PHP event, the
-serializer, or the spec — fails the test.
+with contract tests. On the producer side (`ItemVendedV1ContractTest`): it
+serialises an `ItemVendedV1` with the real `JsonEnvelopeSerializer` and
+validates the result against the payload schema from the spec, and it validates
+the spec's own example too. On the consumer side
+(`ItemVendedV1ReceivedContractTest`): the producer spec's own example decodes
+into the Sales context's `ItemVendedV1Received`. Renaming or removing a field
+on either side — a PHP event, the serializer, or the spec — fails a test.
 
 ### Versioning policy
 
@@ -294,13 +326,15 @@ for spec in docs/asyncapi/*.asyncapi.yaml; do
     asyncapi/cli:6.2.1 validate "$spec"
 done
 
-# Render the producer document to HTML
-docker run --rm --user=root -v "$PWD:/work" -w /work \
-  asyncapi/cli:6.2.1 generate fromTemplate \
-    docs/asyncapi/vending-machine.asyncapi.yaml \
-    @asyncapi/html-template@3.5.6 \
-    --output /work/asyncapi-docs --force-write --no-interactive
-# -> asyncapi-docs/index.html
+# Render every document to HTML (one subdirectory per spec)
+for spec in docs/asyncapi/*.asyncapi.yaml; do
+  name=$(basename "$spec" .asyncapi.yaml)
+  docker run --rm --user=root -v "$PWD:/work" -w /work \
+    asyncapi/cli:6.2.1 generate fromTemplate "$spec" \
+      @asyncapi/html-template@3.5.6 \
+      --output "/work/asyncapi-docs/$name" --force-write --no-interactive
+done
+# -> asyncapi-docs/vending-machine/index.html, asyncapi-docs/sales/index.html
 ```
 
 CI (`.github/workflows/quality.yml`) validates every spec and uploads the
@@ -329,7 +363,7 @@ src/
 │   │                                # port, IntegrationEventSubscriber marker
 │   └── Infrastructure/EventBus/ # Collector, Messenger domain event bus and the
 │                                # command-bus middleware that publishes on commit
-└── VendingMachine/
+├── VendingMachine/
     ├── Domain/                 # Pure business logic. No framework, no I/O.
     │   ├── Model/               # Money, Denomination, Product, ChangeDue,
     │   │                        # VendedItem, VendingMachineId, VendingMachine
@@ -358,6 +392,16 @@ src/
         ├── Http/                # HealthCheck + provision/service/insert-coin/select/return/get controllers
         └── Console/             # HealthCheck + vending-machine commands + the
                                  # outbox relay
+└── Sales/                      # The first consuming context: depends on the
+    │                            # published language only, never on VendingMachine.
+    ├── Domain/                 # Sale (immutable) + SaleId + SaleRepository port
+    ├── Application/            # RegisterSale/ListSales use cases, the
+    │   │                        # consumer-owned ItemVendedV1Received message,
+    │   └── IntegrationEventSubscriber/ # and the subscriber mapping the message
+    │                            # to RegisterSale
+    └── Infrastructure/         # Adapters for Sales.
+        ├── Persistence/Mongo/   # sale repository, unique index on sourceEventId
+        └── Http/                # GET /sales (demo read)
 ```
 
 This is a hexagonal/ports-and-adapters layout: `Domain` and `Application`
@@ -496,13 +540,41 @@ Messenger `SerializerInterface` — never PHP's `serialize()`):
 ```
 
 `messenger:consume` and `messenger:setup-transports` are wired into
-`bin/console` by hand (no framework-bundle), and the
-`#[IntegrationEventSubscriber]` attribute is ready for the consuming slice:
-mark a service and its public event methods are autoconfigured onto
-`integration.bus`, exactly like `#[DomainEventSubscriber]` does for domain
-events. The context's own queue (`vending-machine.integration`) is already
-bound to `vending_machine.#`, so published messages are visible in the
-[RabbitMQ management UI](http://localhost:15672) until consumers land.
+`bin/console` by hand (no framework-bundle). The context's own queue
+(`vending-machine.integration`) is bound to `vending_machine.#`, so published
+messages are visible in the [RabbitMQ management
+UI](http://localhost:15672) even with no consumer.
+
+### The Sales context: the first consumer
+
+**Sales** is the first context to consume the published language, and it
+depends on nothing else: it imports the shared building blocks and its own
+classes, never `App\VendingMachine` — a Mago guard rule enforces that. It
+knows the vending machine only by the id in the message.
+
+The flow, once an item is vended:
+
+1. The **relay** publishes `vending_machine.item_vended.v1` to
+   `vending_machine.integration`, as before.
+2. The Sales worker consumes the durable queue **`sales.item_vended`**, bound
+   to that exchange with the one routing key it cares about. The transport has
+   its own `JsonEnvelopeSerializer` instance mapping the wire type to
+   **`ItemVendedV1Received`** — Sales' own message class, not the producer's.
+3. `RegisterSaleOnItemVended` (a `#[IntegrationEventSubscriber]`) maps the
+   message to a `RegisterSale` command and dispatches it on the command bus.
+4. `RegisterSaleHandler` stores a `Sale` through the `SaleRepository` port. The
+   `sales` collection carries a **unique index on `sourceEventId`** (the
+   envelope `id`), so re-delivering the same message — delivery is
+   at-least-once — is a silent no-op, not a second sale.
+5. A message whose handling keeps failing is **retried with an exponential
+   backoff** (1s, 2s, 4s) and, once the retries are exhausted, **dead-lettered
+   to `sales.item_vended.dlq`**.
+
+The worker is the `sales-worker` compose service
+(`messenger:consume sales_integration_events`). The retry and failure-transport
+listeners the framework would normally register are wired by hand in
+`MessengerCommandsFactory`, since there is no `framework-bundle`. `GET /sales`
+lists what the context has registered, through the query bus — a demo read.
 
 ### MongoDB (write model) / Redis (read model)
 
@@ -542,10 +614,13 @@ get → domain call → save.
   message in [`docs/asyncapi/`](./docs/asyncapi) — a new channel and message
   reusing the shared `envelope` — so the contract stays spec-first. Anything
   not translated is dropped from the outbox unpublished, by design.
-* **New consuming context** — on the consumer side, bind a queue to
-  `vending_machine.integration` with the routing keys it cares about; in this codebase,
-  a class marked `#[IntegrationEventSubscriber]` self-registers onto
-  `integration.bus` and `messenger:consume integration_events` runs it.
+* **New consuming context** — the Sales context is the template: add a
+  consumer-owned message class extending the shared `IntegrationEvent`, a
+  `#[IntegrationEventSubscriber]` that maps it to a command, and a queue bound
+  to `vending_machine.integration` with the routing keys it cares about (see
+  `config/services.yaml`). Give the transport its own `JsonEnvelopeSerializer`
+  instance mapping the wire type to the consumer's class, register it as the
+  consume command's receiver, and run it with `messenger:consume <transport>`.
 
 ## Trade-offs / things I'd revisit next
 

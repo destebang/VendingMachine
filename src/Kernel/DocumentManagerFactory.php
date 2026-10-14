@@ -29,6 +29,7 @@ final class DocumentManagerFactory
         $configuration->setDefaultDB($_ENV['MONGO_DB'] ?? 'vending');
         $configuration->setMetadataDriverImpl(new AttributeDriver([
             dirname(__DIR__) . '/VendingMachine/Infrastructure/Persistence/Mongo',
+            dirname(__DIR__) . '/Sales/Infrastructure/Persistence/Mongo',
         ]));
 
         $client = new Client($_ENV['MONGO_URI'] ?? 'mongodb://mongodb:27017');

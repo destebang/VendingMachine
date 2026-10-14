@@ -14,16 +14,18 @@ use Symfony\Component\DependencyInjection\ContainerBuilder;
 final class UseCaseMessages
 {
     /**
+     * @param list<string> $namespaces
+     *
      * @return list<string>
      */
-    public static function in(ContainerBuilder $container, string $namespace): array
+    public static function in(ContainerBuilder $container, array $namespaces): array
     {
         $messages = [];
 
         foreach ($container->getDefinitions() as $definition) {
             $class = $definition->getClass();
 
-            if ($definition->isAbstract() || $class === null || !self::followsLayout($class, $namespace)) {
+            if ($definition->isAbstract() || $class === null || !self::followsAnyLayout($class, $namespaces)) {
                 continue;
             }
 
@@ -31,6 +33,20 @@ final class UseCaseMessages
         }
 
         return array_keys($messages);
+    }
+
+    /**
+     * @param list<string> $namespaces
+     */
+    private static function followsAnyLayout(string $class, array $namespaces): bool
+    {
+        foreach ($namespaces as $namespace) {
+            if (self::followsLayout($class, $namespace)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function followsLayout(string $class, string $namespace): bool

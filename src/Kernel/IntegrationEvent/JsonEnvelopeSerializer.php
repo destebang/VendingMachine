@@ -9,6 +9,7 @@ use DateTimeImmutable;
 use DateTimeInterface;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Exception\MessageDecodingFailedException;
+use Symfony\Component\Messenger\Stamp\RedeliveryStamp;
 use Symfony\Component\Messenger\Transport\Serialization\SerializerInterface;
 
 /**
@@ -26,9 +27,19 @@ use Symfony\Component\Messenger\Transport\Serialization\SerializerInterface;
  * Always JSON — never PHP's `serialize()`, whose output only PHP consumers
  * could read. Decoding needs the type→class registry (`$eventTypes`), since
  * the envelope intentionally carries no PHP class name.
+ *
+ * The redelivery count rides in a header, not the body: the body is the
+ * published contract and does not change when a message is retried, but the
+ * worker's retry strategy needs the count to survive the round-trip so a
+ * message is retried a bounded number of times before it is dead-lettered.
+ * (Symfony's own serializer stores stamps in `X-Message-Stamp-*` headers for
+ * the same reason; this one only needs the redelivery count.)
  */
 final class JsonEnvelopeSerializer implements SerializerInterface
 {
+    /** Header carrying the retry count across the broker round-trip. */
+    private const string REDELIVERY_COUNT_HEADER = 'x-redelivery-count';
+
     /**
      * @param array<string, class-string<IntegrationEvent>> $eventTypes envelope type => event class
      */
@@ -54,7 +65,7 @@ final class JsonEnvelopeSerializer implements SerializerInterface
             $decoded['type'],
         ));
 
-        return new Envelope($eventClass::fromEnvelope(
+        $envelope = new Envelope($eventClass::fromEnvelope(
             $decoded['id'],
             $decoded['aggregateId'],
             $decoded['aggregateVersion'],
@@ -62,10 +73,18 @@ final class JsonEnvelopeSerializer implements SerializerInterface
             $decoded['correlationId'],
             $decoded['data'],
         ));
+
+        $redeliveryCount = $encodedEnvelope['headers'][self::REDELIVERY_COUNT_HEADER] ?? null;
+
+        if ($redeliveryCount !== null) {
+            $envelope = $envelope->with(new RedeliveryStamp((int) $redeliveryCount));
+        }
+
+        return $envelope;
     }
 
     /**
-     * @return array{body: string, headers: array{content-type: string}}
+     * @return array{body: string, headers: array<string, string>}
      */
     public function encode(Envelope $envelope): array
     {
@@ -76,6 +95,14 @@ final class JsonEnvelopeSerializer implements SerializerInterface
                 'Only integration events can travel on the integration bus, got "%s".',
                 $event::class,
             ));
+        }
+
+        $headers = ['content-type' => 'application/json'];
+
+        $redeliveryStamp = $envelope->last(RedeliveryStamp::class);
+
+        if ($redeliveryStamp instanceof RedeliveryStamp) {
+            $headers[self::REDELIVERY_COUNT_HEADER] = (string) $redeliveryStamp->getRetryCount();
         }
 
         return [
@@ -89,7 +116,7 @@ final class JsonEnvelopeSerializer implements SerializerInterface
                 'correlationId' => $event->correlationId,
                 'data' => $event->data(),
             ], JSON_THROW_ON_ERROR),
-            'headers' => ['content-type' => 'application/json'],
+            'headers' => $headers,
         ];
     }
 }

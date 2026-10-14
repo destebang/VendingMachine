@@ -82,6 +82,6 @@ final class SingleHandlerPerMessagePassTest extends TestCase
 
     private function pass(): SingleHandlerPerMessagePass
     {
-        return new SingleHandlerPerMessagePass(self::APPLICATION_NAMESPACE);
+        return new SingleHandlerPerMessagePass([self::APPLICATION_NAMESPACE]);
     }
 }

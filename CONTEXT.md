@@ -62,6 +62,14 @@ The product a machine hands over on a successful selection, together with the
 change due.
 _Avoid_: dispensed item, product out, output
 
+**Sale**:
+The record, kept by the Sales context, that a machine vended one item: which
+machine, which selector code, the price paid, when it happened, and the id of
+the integration message that reported it. A sale is an immutable fact of its
+own context — it knows the machine only by id, never by its model — and its
+`sourceEventId` makes registering the same message twice a no-op.
+_Avoid_: order, purchase, transaction, receipt
+
 **Return**:
 A customer taking back every coin they inserted, ending the pending transaction
 without a sale. The coins handed back are exactly those inserted, never drawn

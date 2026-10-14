@@ -34,10 +34,13 @@ final class SingleHandlerPerMessagePass implements CompilerPassInterface
     private const array SINGLE_HANDLER_BUSES = ['command.bus', 'query.bus'];
 
     /**
-     * @param string $applicationNamespace prefix of the use-case classes to inspect
+     * @param list<string> $applicationNamespaces prefixes of the use-case classes to inspect, one per context
      */
     public function __construct(
-        private readonly string $applicationNamespace = 'App\\VendingMachine\\Application\\',
+        private readonly array $applicationNamespaces = [
+            'App\\VendingMachine\\Application\\',
+            'App\\Sales\\Application\\',
+        ],
     ) {}
 
     public function process(ContainerBuilder $container): void
@@ -99,7 +102,7 @@ final class SingleHandlerPerMessagePass implements CompilerPassInterface
      */
     private function assertEveryUseCaseIsHandled(ContainerBuilder $container, array $handlersByMessage): void
     {
-        foreach (UseCaseMessages::in($container, $this->applicationNamespace) as $message) {
+        foreach (UseCaseMessages::in($container, $this->applicationNamespaces) as $message) {
             if (array_key_exists($message, $handlersByMessage)) {
                 continue;
             }

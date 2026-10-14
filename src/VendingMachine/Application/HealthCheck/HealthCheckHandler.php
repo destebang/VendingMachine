@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Application\HealthCheck;
 
+use App\Shared\Application\Bus\Attribute\CommandHandler;
 use App\VendingMachine\Application\ReadModel\VendingMachineStateReadModelRepository;
 use App\VendingMachine\Domain\Model\VendingMachine;
 use App\VendingMachine\Domain\Model\VendingMachineId;
@@ -16,6 +17,7 @@ use Throwable;
  * round-trip data, without the application layer knowing which concrete
  * technology sits behind either port.
  */
+#[CommandHandler]
 final class HealthCheckHandler
 {
     public function __construct(

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Application\GetVendingMachineState;
 
+use App\Shared\Application\Bus\Attribute\QueryHandler;
 use App\VendingMachine\Application\ReadModel\MachineStateView;
 use App\VendingMachine\Application\ReadModel\VendingMachineStateReadModelRepository;
 
@@ -12,6 +13,7 @@ use App\VendingMachine\Application\ReadModel\VendingMachineStateReadModelReposit
  * touching the write side. Returns null when the projection has no machine for
  * the id, which the driving adapter surfaces as "not found".
  */
+#[QueryHandler]
 final class GetVendingMachineStateHandler
 {
     public function __construct(

@@ -4,9 +4,14 @@ declare(strict_types=1);
 
 namespace App\Kernel;
 
+use App\Kernel\DependencyInjection\SingleHandlerPerMessagePass;
+use App\Shared\Application\Bus\Attribute\CommandHandler;
+use App\Shared\Application\Bus\Attribute\QueryHandler;
 use Symfony\Component\Config\FileLocator;
+use Symfony\Component\DependencyInjection\ChildDefinition;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\YamlFileLoader;
+use Symfony\Component\Messenger\DependencyInjection\MessengerPass;
 
 /**
  * Hand-assembled dependency injection container, replacing the service
@@ -24,8 +29,30 @@ final class ContainerFactory
         $loader = new YamlFileLoader($container, new FileLocator($projectDir . '/config'));
         $loader->load('services.yaml');
 
+        self::registerHandlerAttributes($container);
+
+        $container->addCompilerPass(new MessengerPass());
+        $container->addCompilerPass(new SingleHandlerPerMessagePass(), priority: -10);
+
         $container->compile();
 
         return $container;
+    }
+
+    /**
+     * Turns the framework-free handler markers into the Messenger tag, so a
+     * use case is wired by adding its handler class alone.
+     */
+    private static function registerHandlerAttributes(ContainerBuilder $container): void
+    {
+        $container->registerAttributeForAutoconfiguration(CommandHandler::class, static function (ChildDefinition $definition): void {
+            $definition->addTag('messenger.message_handler', ['bus' => 'command.bus']);
+        });
+
+        // The read side still rides the single bus in this slice; the query bus
+        // split retargets this attribute to `query.bus`.
+        $container->registerAttributeForAutoconfiguration(QueryHandler::class, static function (ChildDefinition $definition): void {
+            $definition->addTag('messenger.message_handler', ['bus' => 'command.bus']);
+        });
     }
 }

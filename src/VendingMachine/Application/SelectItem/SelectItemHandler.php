@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Application\SelectItem;
 
+use App\Shared\Application\Bus\Attribute\CommandHandler;
 use App\VendingMachine\Application\ReadModel\MachineStateView;
 use App\VendingMachine\Application\ReadModel\VendingMachineStateReadModelRepository;
 use App\VendingMachine\Domain\Model\VendingMachine;
@@ -18,6 +19,7 @@ use App\VendingMachine\Domain\Repository\VendingMachineRepository;
  * or rejection — and the rejection then propagates untouched. A missing machine
  * surfaces as `VendingMachineNotFoundException` before any of this runs.
  */
+#[CommandHandler]
 final class SelectItemHandler
 {
     public function __construct(

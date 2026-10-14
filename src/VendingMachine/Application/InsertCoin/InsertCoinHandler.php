@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Application\InsertCoin;
 
+use App\Shared\Application\Bus\Attribute\CommandHandler;
 use App\VendingMachine\Application\ReadModel\MachineStateView;
 use App\VendingMachine\Application\ReadModel\VendingMachineStateReadModelRepository;
 use App\VendingMachine\Domain\Repository\VendingMachineRepository;
@@ -18,6 +19,7 @@ use App\VendingMachine\Domain\Repository\VendingMachineRepository;
  * projection unchanged; a missing machine surfaces as
  * `VendingMachineNotFoundException`.
  */
+#[CommandHandler]
 final class InsertCoinHandler
 {
     public function __construct(

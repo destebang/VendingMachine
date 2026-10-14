@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\VendingMachine\Application\ProvisionVendingMachine;
 
+use App\Shared\Application\Bus\Attribute\CommandHandler;
 use App\VendingMachine\Application\ReadModel\MachineStateView;
 use App\VendingMachine\Application\ReadModel\VendingMachineStateReadModelRepository;
 use App\VendingMachine\Domain\Model\VendingMachine;
@@ -15,6 +16,7 @@ use App\VendingMachine\Domain\Repository\VendingMachineRepository;
  * port, and seeds the Redis read model with its (empty) initial state so the
  * query side can serve it immediately.
  */
+#[CommandHandler]
 final class ProvisionVendingMachineHandler
 {
     public function __construct(
